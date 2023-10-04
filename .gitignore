@@ -1,7 +1,10 @@
+# data
 *.csv
 *.pth
 *.npy
 
+# configs
 *.ini
 
+# system
 /.idea
