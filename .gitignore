@@ -2,10 +2,6 @@
 *.pth
 *.npy
 
-<<<<<<< HEAD
-*.ini
-=======
 *.ini
 
 /.idea
->>>>>>> 86832c0 (Initial commit)
