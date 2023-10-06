@@ -4,6 +4,7 @@ import os
 from preprocessing import *
 from models import *
 from learning import *
+from utility import *
 
 import pandas as pd
 import numpy as np
@@ -58,8 +59,6 @@ if __name__ == "__main__":
 
     # # learning
     if cross_valid > 0:
-        image_data_list = image_data.split_into(cross_valid)  # list of ImageData object
-        nw_data_list = nw_data.split_into(cross_valid)  # list of NWData object
         pp_data_list = pp_data.split_into(cross_valid)  # list of PPData object
         loss_data = pd.DataFrame([[None for i in range(2*cross_valid+1)] for j in range(max_itr)], columns=["Itr"]+np.array([[f"Gen_loss({i})", f"Disc_loss({i})"] for i in range(cross_valid)]).reshape(-1).tolist()).astype(float)
         loss_data["Itr"] = np.arange(max_itr)
@@ -68,7 +67,7 @@ if __name__ == "__main__":
             generator = get_model(gen_name)
             discriminator = get_model(disc_name)
             # dataloader
-            dataloader_train, dataloader_val, dataloader_test = get_dataloader(image_data_list[i], nw_data_list[i], pp_data_list[i])
+            dataloader_train, dataloader_val, dataloader_test = get_dataloader(image_data, nw_data, pp_data_list[i])
             gan_learning = GANLearning(generator, discriminator, dataloader_train, dataloader_val, dataloader_test, loss_type)
             loss_gen, loss_disc = gan_learning.train(max_itr,
                                        early_stop_itr, diffaugment_num, get_loss=True)  # loss_gen, loss_disc: (iter)
