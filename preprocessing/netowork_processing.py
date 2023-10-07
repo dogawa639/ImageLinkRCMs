@@ -9,6 +9,7 @@ from scipy.sparse import csgraph
 
 from utility import load_json, dump_json, Coord
 
+
 # Define a class for nodes
 class Node:
     utm_num = 4
@@ -32,9 +33,11 @@ class Node:
         for k, v in prop.items():
             if k in self.prop:
                 self.prop[k] = v
+
     @property
     def prop_values(self):
         return list(self.prop.values())
+
 
 class Edge:
     def __init__(self, id, start, end):
@@ -104,6 +107,7 @@ class Edge:
     def prop_values(self):
         return list(self.prop.values())
 
+
 # Define a class for networks
 # abstract class
 class NetworkBase:
@@ -117,7 +121,6 @@ class NetworkBase:
         self.nodes, self.nids = self._set_nodes()  # dict key: id, value: Node
         self.edges, self.lids = self._set_edges()  # dict key: id, value: Edge
         self._set_downstream()  # add downstream edges to each node
-        self._set_action_edges()  # add action edges to each edge
         self._set_edge_nodes()  # (start, end): linkId
 
         self._set_graphs()  # adj cost matrix [start,end], adj cost matrix 線グラフ
@@ -156,11 +159,43 @@ class NetworkBase:
                     tmp_prop[prop] = link_prop[prop].values[i]
                 self.edges[lid].set_prop(tmp_prop)
 
+    def get_shortest_path(self, start, end):
+        # start, end: node id
+        nid2idx = {nid: i for i, nid in enumerate(self.nids)}
+        s = nid2idx[start]
+        e = nid2idx[end]
+        if np.isinf(self.dist_matrix[s, e]):
+            return None, None
+        tmp = e
+        path = []
+        while tmp != s:
+            pre = self.predecessors[s, tmp]
+            path.append(self.edge_nodes[(self.nids[pre], self.nids[tmp])])
+            tmp = pre
+        path.reverse()
+        return path, self.dist_matrix[s, e].astype(np.float32)
+
+    def get_shortest_path_edge(self, start, end):
+        # start, end: link id
+        lid2idx = {lid: i for i, lid in enumerate(self.lids)}
+        s = lid2idx[start]
+        e = lid2idx[end]
+        if np.isinf(self.dist_matrix_edge[s, e]):
+            return None, None
+        tmp = e
+        path = []
+        while tmp != s:
+            pre = self.predecessors_edge[s, tmp]
+            path.append(self.lids[pre])
+            tmp = pre
+        path.reverse()
+        return path, self.dist_matrix_edge[s, e].astype(np.float32)
 
     # functions for inside processing
     def _trim_duplicate(self):
         dup = self.link.duplicated(subset="id", keep="first")
         self.link = self.link.loc[(~dup), :]
+
     def _trim_nodes(self):
         edge_node_set = set(np.unique(np.reshape(self.link[["start", "end"]].values, (-1))))
         val = self.node["id"].values
@@ -188,10 +223,6 @@ class NetworkBase:
     def _set_downstream(self):
         for edge in self.edges.values():
             self.nodes[edge.start.id].add_downstream(edge)
-
-    def _set_action_edges(self):
-        for edge in self.edges.values():
-            edge.set_action_edges()
 
     def _set_edge_nodes(self):
         val = self.link[["id", "start", "end"]].values
@@ -221,5 +252,146 @@ class NetworkBase:
         edge_graph = scipy.sparse.csr_matrix(self.edge_graph)
         self.dist_matrix_edge, self.predecessors_edge = csgraph.floyd_warshall(edge_graph, **kwrds)
 
+    @staticmethod
+    def get_angle(start, end):
+        # angle: 0-360
+        dx = end.x - start.x
+        dy = end.y - start.y
+        if dx == 0:
+            if dy > 0:
+                return 90.0
+            else:
+                return 270.0
+        arctan = np.arctan(dy / dx) * 180.0 / np.pi
+        if dx < 0:
+            arctan += 180.0
+        return arctan % 360
+    @property
+    def feature_num(self):
+        return len(self.link_props)
+
+
+class NetworkCNN(NetworkBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._set_action_edges()  # add action edges to each edge
+
+    def get_feature_matrix(self, lid):
+        # feature_num*3*3 matrix: center element represents the lid
+        # features: length, props
+        feature_mat = np.zeros((self.feature_num, 9), dtype=np.float32)
+        edge_tar = self.edges[lid]
+        # fill feature mat
+        for i in range(9):
+            edge_downs = edge_tar.action_edges[i]
+            for edge_down in edge_downs:
+                for j, link_prop in enumerate(self.link_props):
+                    if link_prop in edge_down.prop:
+                        feature_mat[j, i] += edge_down.prop[link_prop]
+            feature_mat[:, i] /= len(edge_downs) + (len(edge_downs)==0)
+
+        feature_mat[np.isnan(feature_mat)] = 0.0
+        feature_mat = np.reshape(feature_mat, (self.feature_num, 3, 3))
+
+        # create action_edge
+        action_edge = [[edge_down.id for edge_down in edge_tar.action_edges[i]] for i in range(9)]  # [[edge_id]]
+
+        return feature_mat, action_edge
+
+    def get_context_matrix(self, lid, d_node_id):
+        # context_feature_num*3*3 matrix: center element represents the lid
+        # features: shortest_path_to_destination, angle_from_destination(0-360)
+        context_mat = np.zeros((self.context_feature_num, 9), dtype=np.float32)
+        edge_tar = self.edges[lid]
+        # fill context_mat
+        for i in range(9):
+            edge_downs = edge_tar.action_edges[i]
+            for edge_down in edge_downs:
+                _, shortest_distance = self.get_shortest_path(edge_down.end.id, d_node_id)
+                if shortest_distance is None:
+                    shortest_distance = 2000
+                d_angle = 0
+                if edge_down.end.id != d_node_id:
+                    d_angle = self.get_angle(edge_down.end, self.nodes[d_node_id])
+                    d_angle = np.abs((d_angle - edge_down.angle) % 360 - 180)
+                context_mat[0, i] += shortest_distance
+                context_mat[1, i] += d_angle
+            context_mat[:, i] /= len(edge_downs) + (len(edge_downs)==0)
+
+        context_mat = np.reshape(context_mat, (self.context_feature_num, 3, 3))
+        context_mat[np.isnan(context_mat)] = 0.0
+
+        # create action_edge
+        action_edge = [[edge_down.id for edge_down in edge_tar.action_edges[i]] for i in range(9)]  # [[edge_id]]
+
+        return context_mat, action_edge
+
+    def get_all_feature_matrix(self, d_node_id):
+        # all_features: [link_num, f+c]
+        all_features = np.zeros((len(self.edges), self.feature_num+self.context_feature_num), dtype=np.float32)
+        for i, lid in enumerate(self.lids):
+            edge = self.edges[lid]
+            all_features[i, 0] = edge.length #length of link
+            if not edge.prop is None:
+                for j, link_prop in enumerate(self.link_props):
+                    if link_prop in edge.prop:
+                        all_features[i, 1+j] = edge.prop[link_prop]
+            _, shortest_distance = self.get_shortest_path(edge.end.id, d_node_id)
+            if shortest_distance is None:
+                shortest_distance = 2000
+            all_features[i, self.feature_num] = shortest_distance #shortest distance to the destination
+            d_angle = 0
+            if edge.end.id != d_node_id:
+                d_angle = self.get_angle(edge.end, self.nodes[d_node_id])
+                d_angle = np.abs((d_angle - edge.angle) % 360 - 180)
+            all_features[i, self.feature_num+1] = d_angle #angle from the destinaiton
+
+        return all_features
+
+    # functions for inside processing
+    def _set_action_edges(self):
+        for edge in self.edges.values():
+            edge.set_action_edges()
+
+    @property
+    def context_feature_num(self):
+        # shortest path length, angle
+        return 2
+
+
+class NetworkGNN(NetworkBase):
+    # basically using the edge graph
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._set_laplacian_matrix()
+
+    def get_feature_matrix(self):
+        # feature of all edges (link_num, feature_num)
+        feature_mat = np.zeros((len(self.edges), self.feature_num), dtype=np.float32)
+        for i, edge in enumerate(self.edges.values()):
+            for j, link_prop in enumerate(self.link_props):
+                if link_prop in edge.prop:
+                    feature_mat[i, j] = edge.prop[link_prop]
+        return feature_mat
+
+    # functions for inside processing
+    def _set_laplacian_matrix(self):
+        # 位置エンコーディング用
+        self.d_matrix = np.zeros((len(self.edges), len(self.edges)), dtype=np.float32)
+        self.a_matrix = np.zeros((len(self.edges), len(self.edges)), dtype=np.float32)
+        lid2idx = {lid: i for i, lid in enumerate(self.lids)}
+        for i, edge in enumerate(self.edges.values()):
+            for edge_down in edge.end.downstream:
+                self.a_matrix[i, lid2idx[edge_down.id]] = 1.0
+            self.d_matrix[i, i] = len(edge.end.downstream)
+        self.laplacian_matrix = self.d_matrix - self.a_matrix
+
+        d_inv_half = np.diag(np.power(np.diag(self.d_matrix + (self.d_matrix == 0)), -0.5))
+        self.norm_laplacian_matrix = np.identity(len(self.edges)) - np.matmul(np.matmul(d_inv_half, self.a_matrix), d_inv_half)
+
+        d_plus = np.identity(len(self.edges)) + self.d_matrix
+        a_plus = np.identity(len(self.edges)) + self.a_matrix
+        d_plus_inv_half = np.diag(np.power(np.diag(d_plus), -0.5))  # (I+D)^-0.5
+        self.renorm_laplacian_matrix = np.matmul(np.matmul(d_plus_inv_half, a_plus), d_plus_inv_half)
 
 
