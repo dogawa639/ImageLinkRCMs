@@ -107,6 +107,10 @@ class Edge:
     def prop_values(self):
         return list(self.prop.values())
 
+    @property
+    def center(self):
+        return (self.start.x + self.end.x) / 2.0, (self.start.y + self.end.y) / 2.0
+
 
 # Define a class for networks
 # abstract class
