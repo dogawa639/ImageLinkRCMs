@@ -9,7 +9,7 @@ import pyproj
 
 from PIL import Image
 
-__all__ = ["load_json", "dump_json", "Coord"]
+__all__ = ["load_json", "dump_json", "Coord", "MapSegmentation"]
 
 
 def load_json(file):
@@ -40,5 +40,44 @@ class Coord:
     def from_utm(self, x, y):
         lon, lat = transform(self.project_from_utm, Point(x, y))
         return (lon, lat)
+    
+
+class MapSegmentation:
+    # 地図の色からクラスのone-hot vectorを作成する
+    def __init__(self, files):
+        self.files = files
+        self.color_dict = self._load_color_dict() # key: (r,g,b), value: class_num
+        self.class_num = len(self.color_dict)
+
+        self.color_list = [None] * self.class_num
+        for k,v in self.color_dict.items():
+            self.color_list[v] = k
+
+    def _load_color_dict(self):
+        color_dict = {}
+        for file in self.files:
+            input_image = Image.open(file)
+            input_image = input_image.convert("RGB")
+            input_image = np.array(input_image)
+            for i in range(input_image.shape[0]):
+                for j in range(input_image.shape[1]):
+                    color = tuple(input_image[i,j,:])
+                    if color not in color_dict:
+                        color_dict[color] = len(color_dict)
+        return color_dict
+
+    def convert_file(self, file, np_file=None):
+        input_image = Image.open(file)
+        input_image = input_image.convert("RGB")
+        input_image = np.array(input_image)
+        one_hot = np.zeros((self.class_num, input_image.shape[0], input_image.shape[1]), dtype=np.uint8)# (C, H, W)
+        for i in range(input_image.shape[0]):
+            for j in range(input_image.shape[1]):
+                color = tuple(input_image[i,j,:])
+                if color in self.color_dict:
+                    one_hot[self.color_dict[color], i, j] = 1.0
+        if np_file is not None:
+            np.save(np_file, one_hot)
+        return one_hot
 
 

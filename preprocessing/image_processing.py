@@ -181,3 +181,6 @@ class ImageData:
         x_idxs = np.where(mask.sum(axis=0) > 0)
         y_idxs = np.where(mask.sum(axis=1) > 0)
         return (image * mask)[np.ix_(list(range(image.shape[0])), x_idxs, y_idxs)]
+    
+
+

@@ -5,6 +5,8 @@ from torch.optim.lr_scheduler import ConstantLR
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 
+from torchvision import transforms
+
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
@@ -13,11 +15,14 @@ from scipy.sparse import csr_matrix, coo_matrix
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from PIL import Image
 import datetime
 
 import os
 
-__all__ = ["GridDataset", "PPEmbedDataset"]
+from util import MapSegmentation
+
+__all__ = ["GridDataset", "PPEmbedDataset", "ImageDataset", "calc_loss"]
 
 
 class GridDataset(Dataset):
@@ -117,6 +122,268 @@ class PPEmbedDataset(Dataset):
         return adj_matrix
     
 
+class ImageDataset(Dataset):
+    # for unsupervised learning
+    def __init__(self, files, additional_files=None, output_files=None, input_shape=(520, 520), num_sample=200):
+        # files:[png file]
+        # output_files:[npy file] (optional)
+        super(ImageDataset, self).__init__()
+        self.files = files
+        self.additional_files = additional_files
+        self.output_files = output_files
+        if not additional_files is None:
+            if len(files) != len(additional_files):
+                print("files and additional_files must have same length.")
+                raise(ValueError)
+        if not output_files is None:
+            if len(files) != len(output_files):
+                print("files and output_files must have same length.")
+                raise(ValueError)
+        self.input_shape = input_shape
+        self.num_sample = num_sample
+
+        self.ra_params = [
+            (-90, 90),  # degree
+            (0.1, 0.1),  # translate
+            (0.9, 1.1),  # scale
+            (-1, 1, -1, 1),  # shear
+            self.input_shape  # img_size
+        ]
+
+        self.rc = transforms.RandomCrop(input_shape)  # random crop
+        self.ra = transforms.RandomAffine(*self.ra_params[0:-1])
+
+        self._load_data()  # self.input_tensors
+        self._split_data(num_sample=num_sample)  # self.cropped_tensor
+
+    def __del__(self):
+        if not self.output_files is None:
+            for pt_file in self.output_tensors:
+                os.remove(pt_file)
+            for pt_file in self.cropped_output:
+                os.remove(pt_file)
+
+    def __getitem__(self, i):
+        tmp_tensor = self.cropped_tensor[i]
+        additional_tensor = tensor([]) if len(self.cropped_additional) == 0 else self.cropped_additional[i]
+        one_hot_tensor =tensor([]) if len(self.cropped_output) == 0 else torch.load(self.cropped_output[i])
+        return self._random_transform(tmp_tensor, additional_tensor, one_hot_tensor)
     
+    def __len__(self):
+        return self.cropped_tensor.shape[0]
+
+    def affine_by_origin_idx(self, img, idx_transformed):
+        # img (N, C, H, W)
+        # idx_transformed (N, 1, H, W)
+        idx_transformed = idx_transformed.to("cpu")
+        img_channels = img.shape[1]
+        img_resolv = img.shape[2] * img.shape[3]
+
+        idx_transformed = idx_transformed.repeat(1, img_channels, 1, 1)
+        null_idx = idx_transformed < 0
+        batch_num = (np.arange(img.numel()) / img_resolv).astype(int) * img_resolv  # when img shape (bs, C, H, W)
+        batch_num = tensor(batch_num, dtype=int, device="cpu")
+        batch_num = batch_num.view(img.shape)
+        idx_transformed = idx_transformed + batch_num.reshape(img.shape)
+        idx_transformed[null_idx] = 0
+
+        new_img = tensor(np.zeros(img.shape), dtype=img.dtype, device=img.device)
+        new_img.reshape(-1)[:] = img.reshape(-1)[idx_transformed.reshape(-1)]
+        new_img.reshape(-1)[null_idx.reshape(-1)] = 0
+
+        return new_img
+
+    def resplit_data(self):
+        self._split_data(num_sample=self.num_sample)
+    
+
+    def _load_data(self):
+        input_tensors = []
+        additional_tensors = []
+        # input files
+        for file in self.files:
+            input_image = Image.open(file)
+            input_image = input_image.convert("RGB")
+            preprocess = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+
+            input_tensor = preprocess(input_image)  # (3, H, W)
+            input_tensors.append(input_tensor)
+        # additional input
+        if not self.additional_files is None:
+            for file in self.additional_files:
+                input_image = Image.open(file)
+                input_image = input_image.convert("RGB")
+                preprocess = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                ])
+
+                input_tensor = preprocess(input_image)  # (3, H, W)
+                additional_tensors.append(input_tensor)
+        self.input_tensors = input_tensors
+        self.additional_tensors = additional_tensors
+
+        # output file (supervised)
+        output_tensors = []
+        self.map_seg = None
+        if not self.output_files is None:
+            map_seg = MapSegmentation(self.output_files)
+            self.map_seg = map_seg
+            for file in self.output_files:
+                output_tensor = torch.tensor(map_seg.convert_file(file), dtype=torch.uint8)
+                pt_file = file.replace(".png", ".pt")
+                torch.save(output_tensor, pt_file)
+                output_tensors.append(pt_file)
+        self.output_tensors = output_tensors
+
+    def _split_data(self, num_sample=200):
+        # split data into some pices with shape (3, H, W)
+        input_shape = self.input_shape
+
+        cropped_tensor = torch.tensor(np.zeros((num_sample * len(self.input_tensors), 3, input_shape[0], input_shape[1]), dtype=np.float32))
+        cropped_additional = torch.tensor(np.zeros((num_sample * len(self.input_tensors), 3, input_shape[0], input_shape[1]), dtype=np.float32))
+        class_num = 0
+        if not self.output_files is None:
+            class_num = self.map_seg.class_num
+        cropped_output = []  # path of npy files
+        for i in range(len(self.input_tensors)):
+            input_tensor = self.input_tensors[i]
+            if input_tensor.shape[1] < input_shape[0] or input_tensor.shape[2] < input_shape[1]:
+                print("Too small input image.")
+                raise(ValueError)
+            for num in range(num_sample):
+                rc_params = transforms.RandomCrop.get_params(input_tensor, input_shape)
+                cropped_tensor[i * num_sample + num, :, :, :] = transforms.functional.crop(input_tensor, *rc_params)
+                if not self.additional_files is None:
+                    cropped_additional[i * num_sample + num, :, :, :] = transforms.functional.crop(self.additional_tensors[i], *rc_params)
+                if not self.output_files is None:
+                    pt_tile = self.output_tensors[i].replace(".pt", f"_{num}.pt")
+                    cropped_output_tmp = transforms.functional.crop(torch.load(self.output_tensors[i]), *rc_params)
+                    torch.save(cropped_output_tmp, pt_tile)
+                    cropped_output.append(pt_tile)
+        self.cropped_tensor = cropped_tensor
+        self.cropped_additional = cropped_additional
+        self.cropped_output = cropped_output
+
+    def _get_affine_origin_idx(self, ra_params):
+        # idx of tensor before transform for each pixel after transform
+        idx = tensor(np.arange(self.input_shape[0] * self.input_shape[1], dtype=int).reshape((1, self.input_shape[0], self.input_shape[1])))
+        idx_transformed = transforms.functional.affine(idx, *ra_params, interpolation=transforms.InterpolationMode.NEAREST, fill=-1)
+
+        return idx_transformed
+
+    def _get_mask(self, ra_params):
+        # mask for img_tensor
+        mask = tensor(np.ones((1, self.input_shape[0], self.input_shape[1]), dtype=np.float32))
+        mask = transforms.functional.affine(mask, *ra_params)  # mask for both tensor
+
+        return mask
+
+    def _random_transform(self, img_tensor, additional_tensor, one_hot_tensor):
+        # tensor (3, H, W)
+        ra_params = self.ra.get_params(*self.ra_params)
+
+        transformed = transforms.functional.affine(img_tensor, *ra_params)
+        if len(additional_tensor) == 0:
+            additional_transformed = tensor([])
+        else:
+            additional_transformed = transforms.functional.affine(additional_tensor, *ra_params)
+        if len(one_hot_tensor) == 0:
+            one_hot_transformed = tensor([])
+        else:
+            one_hot_tensor = transforms.functional.affine(one_hot_tensor, *ra_params)
+
+        mask = self._get_mask(ra_params)
+        idx_transformed = self._get_affine_origin_idx(ra_params) # idx for original tensor
+
+        rand = torch.rand(2)
+        if rand[0] < 0.5:
+            # vflip
+            transformed = transforms.functional.vflip(transformed)
+            if len(additional_tensor) > 0:
+                additional_transformed = transforms.functional.vflip(additional_transformed)
+            if len(one_hot_tensor) > 0:
+                one_hot_transformed = transforms.functional.vflip(one_hot_transformed)
+            mask = transforms.functional.vflip(mask)
+            idx_transformed = transforms.functional.vflip(idx_transformed)
+        if rand[1] < 0.5:
+            # hflip
+            transformed = transforms.functional.hflip(transformed)
+            if len(additional_tensor) > 0:
+                additional_transformed = transforms.functional.hflip(additional_transformed)
+            if len(one_hot_tensor) > 0:
+                one_hot_transformed = transforms.functional.hflip(one_hot_transformed)
+            mask = transforms.functional.hflip(mask)
+            idx_transformed = transforms.functional.hflip(idx_transformed)
+
+        return img_tensor, transformed, additional_tensor, additional_transformed, one_hot_tensor, one_hot_transformed, mask, idx_transformed
+    
+def calc_loss(model, dataset, dataloader, loss_fn, device, optimizer=None, scheduler=None, model_additional=None, optimizer_additional=None, scheduler_additionl=None, loss_fn_kwargs={}):
+    if not optimizer is None:
+        model.train()
+    else:
+        model.eval()
+
+    tmp_loss = []
+    tmp_loss_add = []
+    for img_tensor, transformed, additional_tensor, additional_transformed, one_hot_tensor, one_hot_transformed, mask, idx_transformed in dataloader:
+        img_tensor = img_tensor.to(device)
+        transformed = transformed.to(device)
+        additional_tensor = additional_tensor.to(device)
+        additional_transformed =additional_transformed.to(device)
+        one_hot_tensor = one_hot_tensor.to(device)
+        one_hot_transformed = one_hot_transformed.to(device)
+        mask = mask.to(device)
+
+        if not optimizer is None:
+            optimizer.zero_grad()
+        if not optimizer_additional is None:
+            optimizer_additional.zero_grad()
+
+        y, y2 = _get_y_y2(model, img_tensor, transformed, mask, idx_transformed, dataset)
+
+        loss = loss_fn(y, y2, **loss_fn_kwargs)
+        loss_add = tensor(0.0, dtype=torch.float32, requires_grad=True, device=device)
+        if additional_tensor.max() > 0:
+            if not model_additional is None:
+                y_add, y2_add = _get_y_y2(model_additional, img_tensor, transformed, mask, idx_transformed, dataset)
+                loss_add = loss_fn(y_add, y2_add, **loss_fn_kwargs) # loss for additional file
+                loss_add += loss_fn(y, y_add, **loss_fn_kwargs) # loss between file and additional
+                if not optimizer_additional is None:
+                    loss_add.backward(retain_graph=True)
+                    optimizer_additional.step()
+                loss += loss_fn(y, y_add, **loss_fn_kwargs) # loss between file and additional
+            else:
+                y_add, y2_add = _get_y_y2(model, img_tensor, transformed, mask, idx_transformed, dataset)
+                loss += loss_fn(y, y2, **loss_fn_kwargs) # loss for additional file
+                loss += loss_fn(y, y_add, **loss_fn_kwargs) # loss between file and additional
+        if one_hot_tensor.max() > 0:
+            loss += loss_fn(y, one_hot_tensor, **loss_fn_kwargs)
+
+        if not optimizer is None:
+            loss.backward(retain_graph=True)
+            optimizer.step()
+        if not optimizer_additional is None:
+            loss_add.backward(retain_graph=True)
+            optimizer_additional.step()
+
+        tmp_loss.append(loss.detach().cpu().item())
+        tmp_loss_add.append(loss_add.detach().cpu().item())
+    if not scheduler is None:
+        scheduler.step()
+    if not scheduler_additionl is None:
+        scheduler_additionl.step()
+    return tmp_loss, tmp_loss_add
+
+def _get_y_y2(model, img_tensor, transformed, mask, idx_transformed, dataset):
+    y = model(img_tensor)["out"]  # input (N, C, H, W)
+    y = dataset.affine_by_origin_idx(y, idx_transformed)  # g
+    y = y * mask
+    y2 = model(transformed)["out"]  # filter (N, C, H, W)
+    y2 = y2 * mask
+    return y, y2
 
 
