@@ -5,6 +5,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 import scipy
+from scipy import sparse
+from scipy.sparse import csr_matrix, coo_matrix
 from scipy.sparse import csgraph
 
 from sklearn.preprocessing import StandardScaler
@@ -431,8 +433,10 @@ class NetworkCNN(NetworkBase):
 
 class NetworkGNN(NetworkBase):
     # basically using the edge graph
-    def __init__(self, *args, **kwargs):
+    def __init__(self, k=50, *args, **kwargs):
+        # k eig vectors to be used for pos encoding
         super().__init__(*args, **kwargs)
+        self.k = k
         self._set_laplacian_matrix()
 
         self.sc_link = StandardScaler()
@@ -457,9 +461,9 @@ class NetworkGNN(NetworkBase):
 
     # functions for inside processing
     def _set_laplacian_matrix(self):
-        # 位置エンコーディング用
-        self.d_matrix = np.zeros((len(self.edges), len(self.edges)), dtype=np.float32)
-        self.a_matrix = np.zeros((len(self.edges), len(self.edges)), dtype=np.float32)
+        # 位置エンコーディング用 (線グラフ)
+        self.d_matrix = csr_matrix((len(self.edges), len(self.edges)), dtype=np.float32)
+        self.a_matrix = csr_matrix((len(self.edges), len(self.edges)), dtype=np.float32)
         lid2idx = {lid: i for i, lid in enumerate(self.lids)}
         for i, edge in enumerate(self.edges.values()):
             for edge_down in edge.end.downstream:
@@ -467,11 +471,18 @@ class NetworkGNN(NetworkBase):
             self.d_matrix[i, i] = len(edge.end.downstream)
         self.laplacian_matrix = self.d_matrix - self.a_matrix
 
-        d_inv_half = np.diag(np.power(np.diag(self.d_matrix + (self.d_matrix == 0)), -0.5))
-        self.norm_laplacian_matrix = np.identity(len(self.edges)) - np.matmul(np.matmul(d_inv_half, self.a_matrix),
-                                                                              d_inv_half)
+        d_diag = self.d_matrix.diagonal()
+        d_diag[d_diag != 0] = np.power(d_diag[d_diag != 0], -0.5)
+        d_inv_half = coo_matrix((d_diag, (range(len(self.edges)), range(len(self.edges)))), shape=(len(self.edges), len(self.edges))).tocsr()
+        self.norm_laplacian_matrix = sparse.identity(len(self.edges), dtype=np.float32, format="csr") - d_inv_half * self.a_matrix * d_inv_half  # I - D^-0.5 * A * D^-0.5
+        norm_eig_val, self.norm_eig_vec = sparse.linalg.eigs(self.norm_laplacian_matrix, k=self.k, which="SR", tol=0)
+        self.norm_eig_vec = self.norm_eig_vec[:, norm_eig_val.argsort()]  # ndarray (link_num, k)
 
-        d_plus = np.identity(len(self.edges)) + self.d_matrix
-        a_plus = np.identity(len(self.edges)) + self.a_matrix
-        d_plus_inv_half = np.diag(np.power(np.diag(d_plus), -0.5))  # (I+D)^-0.5
-        self.renorm_laplacian_matrix = np.matmul(np.matmul(d_plus_inv_half, a_plus), d_plus_inv_half)
+        d_plus = sparse.identity(len(self.edges), dtype=np.float32, format="csr") + self.d_matrix
+        a_plus = sparse.identity(len(self.edges), dtype=np.float32, format="csr") + self.a_matrix
+
+        d_plus_diag = np.power(d_plus.diagonal(), -0.5)
+        d_plus_inv_half = coo_matrix((d_plus_diag, (range(len(self.edges)), range(len(self.edges)))), shape=(len(self.edges), len(self.edges))).tocsr()  # (I+D)^-0.5
+        self.renorm_laplacian_matrix = d_plus_inv_half * a_plus * d_plus_inv_half  # (I+D)^-0.5 * (I+A) * (I+D)^-0.5
+        renorm_eig_val, self.renorm_eig_vec = sparse.linalg.eigs(self.renorm_laplacian_matrix, k=self.k, which="SR", tol=0)
+        self.renorm_eig_vec = self.renorm_eig_vec[:, renorm_eig_val.argsort()]  # ndarray (link_num, k)

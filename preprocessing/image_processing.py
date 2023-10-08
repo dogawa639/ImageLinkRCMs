@@ -64,6 +64,18 @@ class ImageData:
             convex_hull_path = data["path"].replace(".png", "_convex_hull.png")
             data["convex_hull_path"] = convex_hull_path
             cv2.imwrite(convex_hull_path, convex_hull_mask)
+
+    def load_images(self):
+        # for i in range(len(image_data)):
+        #    image = image_data.load_images()
+        data_idx = 0
+        while True:
+            if data_idx >= len(self.data_list):
+                break
+            data = self.data_list[data_idx]
+            image = np.array(Image.open(data["path"]), dtype=np.uint8).transpose(0, 2)  # RGB (3, H, W)
+            yield image
+            data_idx += 1
         
     def load_link_patches(self):
         # 直前に呼び出したset_voronoiに対応する．
@@ -98,6 +110,30 @@ class ImageData:
             del image
 
             yield patches
+            data_idx += 1
+
+    def load_link_masks(self):
+        # 直前に呼び出したset_voronoiに対応する．
+        # for i in range(len(image_data)):
+        #    mask = image_data.load_link_masks()
+        data_idx = 0
+        while True:
+            if data_idx >= len(self.data_list):
+                break
+            data = self.data_list[data_idx]
+            if "voronoi_path" not in data or "convex_hull_path" not in data:
+                print("Set voironoi first!")
+                break
+
+            voronoi = np.array(Image.open(data["voronoi_path"]))  # RGB (H, W, 3)
+            voronoi_lids = ImageData.get_number_from_rgb(voronoi[:,:,0], voronoi[:,:,1], voronoi[:,:,2]).astype(int)  # (H, W)
+            del voronoi
+
+            convex_hull_mask = np.array(Image.open(data["convex_hull_path"]))  # gray (H, W)
+            voronoi_lids = voronoi_lids * (convex_hull_mask > 0) + (convex_hull_mask == 0) * -1
+            del convex_hull_mask
+
+            yield voronoi_lids
             data_idx += 1
 
     def _get_xy(self):
@@ -135,3 +171,13 @@ class ImageData:
         get the number from the rgb value
         """
         return r * 65536 + g * 256 + b
+    
+    @staticmethod
+    def get_masked(image, mask, lid):
+        # image: (C, H, W)
+        # mask: (H, W) with lid at each pixel
+        # lid: int
+        mask = mask == lid
+        x_idxs = np.where(mask.sum(axis=0) > 0)
+        y_idxs = np.where(mask.sum(axis=1) > 0)
+        return (image * mask)[np.ix_(list(range(image.shape[0])), x_idxs, y_idxs)]
