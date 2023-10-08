@@ -9,6 +9,8 @@ import os
 
 from utility import load_json, dump_json, Coord
 
+__all__ = ["ImageData"]
+
 # 画像データの読み込み，座標付与
 class ImageData:
     def __init__(self, data_file):

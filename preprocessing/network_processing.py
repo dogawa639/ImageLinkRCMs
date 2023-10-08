@@ -7,7 +7,11 @@ import matplotlib.pyplot as plt
 import scipy
 from scipy.sparse import csgraph
 
+from sklearn.preprocessing import StandardScaler
+
 from utility import load_json, dump_json, Coord
+
+__all__ = ["NetworkCNN", "NetworkGNN"]
 
 
 # Define a class for nodes
@@ -61,6 +65,16 @@ class Edge:
         for edge_down in self.end.downstream:
             idx = self.get_action_index(edge_down.angle, self.angle)
             self.action_edges[idx].append(edge_down)
+
+    def get_action_edges_mask(self):
+        return np.array([len(edges) > 0 for edges in self.action_edges])
+    def get_d_edge_mask(self, d_edge):
+        if type(d_edge) != int:  # d_edge: edge obj
+            d_edge = d_edge.id
+        action_edge_ids = [[edge.id for edge in edges] for edges in self.action_edges]
+        mask = np.array([d_edge in edge_ids for edge_ids in action_edge_ids])
+        return mask
+
 
     @staticmethod
     def get_length(start, end):
@@ -132,13 +146,21 @@ class NetworkBase:
 
         self.node_props = []
         self.link_props = []
-        if node_prop_path is not None:
-            self.set_node_prop(node_prop_path)
-        if link_prop_path is not None:
-            self.set_link_prop(link_prop_path)
 
-    def set_node_prop(self, node_prop_path):
-        node_prop = pd.read_csv(node_prop_path)  # columns=['NodeID', prop1,...]
+        self.sc_node = StandardScaler()
+        self.sc_link = StandardScaler()
+
+        if node_prop_path is not None:
+            self.set_node_prop(node_prop_path=node_prop_path)
+        if link_prop_path is not None:
+            self.set_link_prop(link_prop_path=link_prop_path)
+
+    def set_node_prop(self, node_prop=None, node_prop_path=None):
+        if node_prop_path is not None:
+            node_prop = pd.read_csv(node_prop_path)  # columns=['NodeID', prop1,...]
+        if node_prop is None:
+            print("node_prop is None.")
+            return
         node_props = node_prop.columns.to_list()
         node_props.remove("NodeID")
         self.node_props = self.node_props + node_props
@@ -150,8 +172,12 @@ class NetworkBase:
                     tmp_prop[prop] = node_prop[prop].values[i]
                 self.nodes[nid].set_prop(tmp_prop)
 
-    def set_link_prop(self, link_prop_path):
-        link_prop = pd.read_csv(link_prop_path)
+    def set_link_prop(self, link_prop=None, link_prop_path=None):
+        if link_prop_path is not None:
+            link_prop = pd.read_csv(link_prop_path)
+        if link_prop is None:
+            print("link_prop is None.")
+            return
         link_props = link_prop.columns.to_list()
         link_props.remove("LinkID")
         self.link_props = self.link_props + link_props
@@ -194,6 +220,19 @@ class NetworkBase:
             tmp = pre
         path.reverse()
         return path, self.dist_matrix_edge[s, e].astype(np.float32)
+
+    def get_sc_params_node(self):
+        return self.sc_node.mean_, self.sc_node.scale_
+    def get_sc_params_link(self):
+        return self.sc_link.mean_, self.sc_link.scale_
+
+    def set_sc_params_node(self, params):
+        self.sc_node.mean_ = params[0]
+        self.sc_node.scale_ = params[1]
+
+    def set_sc_params_link(self, params):
+        self.sc_link.mean_ = params[0]
+        self.sc_link.scale_ = params[1]
 
     # functions for inside processing
     def _trim_duplicate(self):
@@ -270,6 +309,7 @@ class NetworkBase:
         if dx < 0:
             arctan += 180.0
         return arctan % 360
+
     @property
     def feature_num(self):
         return len(self.link_props)
@@ -280,10 +320,12 @@ class NetworkCNN(NetworkBase):
         super().__init__(*args, **kwargs)
         self._set_action_edges()  # add action edges to each edge
 
-    def get_feature_matrix(self, lid):
+        self.sc_link = StandardScaler()
+
+    def get_feature_matrix(self, lid, normalize=False):
         # feature_num*3*3 matrix: center element represents the lid
         # features: length, props
-        feature_mat = np.zeros((self.feature_num, 9), dtype=np.float32)
+        feature_mat = np.zeros((9, self.feature_num), dtype=np.float32)
         edge_tar = self.edges[lid]
         # fill feature mat
         for i in range(9):
@@ -291,21 +333,25 @@ class NetworkCNN(NetworkBase):
             for edge_down in edge_downs:
                 for j, link_prop in enumerate(self.link_props):
                     if link_prop in edge_down.prop:
-                        feature_mat[j, i] += edge_down.prop[link_prop]
-            feature_mat[:, i] /= len(edge_downs) + (len(edge_downs)==0)
+                        feature_mat[i, j] += edge_down.prop[link_prop]
+            feature_mat[i, :] /= len(edge_downs) + (len(edge_downs) == 0)
+        if normalize:
+            feature_mat = np.concatenate((feature_mat, np.zeros(9, self.context_feature_num)), axis=1)
+            feature_mat = self.sc_link.transform(feature_mat)
+            feature_mat = feature_mat[:, :self.feature_num]
 
         feature_mat[np.isnan(feature_mat)] = 0.0
-        feature_mat = np.reshape(feature_mat, (self.feature_num, 3, 3))
+        feature_mat = feature_mat.transpose(0, 1).reshape(self.feature_num, 3, 3)
 
         # create action_edge
         action_edge = [[edge_down.id for edge_down in edge_tar.action_edges[i]] for i in range(9)]  # [[edge_id]]
 
         return feature_mat, action_edge
 
-    def get_context_matrix(self, lid, d_node_id):
+    def get_context_matrix(self, lid, d_node_id, normalize=False):
         # context_feature_num*3*3 matrix: center element represents the lid
         # features: shortest_path_to_destination, angle_from_destination(0-360)
-        context_mat = np.zeros((self.context_feature_num, 9), dtype=np.float32)
+        context_mat = np.zeros((9, self.context_feature_num), dtype=np.float32)
         edge_tar = self.edges[lid]
         # fill context_mat
         for i in range(9):
@@ -318,39 +364,59 @@ class NetworkCNN(NetworkBase):
                 if edge_down.end.id != d_node_id:
                     d_angle = self.get_angle(edge_down.end, self.nodes[d_node_id])
                     d_angle = np.abs((d_angle - edge_down.angle) % 360 - 180)
-                context_mat[0, i] += shortest_distance
-                context_mat[1, i] += d_angle
-            context_mat[:, i] /= len(edge_downs) + (len(edge_downs)==0)
+                context_mat[i, 0] += shortest_distance
+                context_mat[i, 1] += d_angle
+            context_mat[i, :] /= len(edge_downs) + (len(edge_downs) == 0)
 
-        context_mat = np.reshape(context_mat, (self.context_feature_num, 3, 3))
+        if normalize:
+            context_mat = np.concatenate((np.zeros(9, self.feature_num), context_mat), axis=1)
+            context_mat = self.sc_link.transform(context_mat)
+            context_mat = context_mat[:, self.feature_num:]
+
         context_mat[np.isnan(context_mat)] = 0.0
+        context_mat = context_mat.transpose(0, 1).reshape(self.context_feature_num, 3, 3)
 
         # create action_edge
         action_edge = [[edge_down.id for edge_down in edge_tar.action_edges[i]] for i in range(9)]  # [[edge_id]]
 
         return context_mat, action_edge
 
-    def get_all_feature_matrix(self, d_node_id):
+    def get_all_feature_matrix(self, d_node_id, normalize=False):
         # all_features: [link_num, f+c]
-        all_features = np.zeros((len(self.edges), self.feature_num+self.context_feature_num), dtype=np.float32)
+        all_features = np.zeros((len(self.edges), self.feature_num + self.context_feature_num), dtype=np.float32)
         for i, lid in enumerate(self.lids):
             edge = self.edges[lid]
-            all_features[i, 0] = edge.length #length of link
+            all_features[i, 0] = edge.length  # length of link
             if not edge.prop is None:
                 for j, link_prop in enumerate(self.link_props):
                     if link_prop in edge.prop:
-                        all_features[i, 1+j] = edge.prop[link_prop]
+                        all_features[i, 1 + j] = edge.prop[link_prop]
             _, shortest_distance = self.get_shortest_path(edge.end.id, d_node_id)
             if shortest_distance is None:
                 shortest_distance = 2000
-            all_features[i, self.feature_num] = shortest_distance #shortest distance to the destination
+            all_features[i, self.feature_num] = shortest_distance  # shortest distance to the destination
             d_angle = 0
             if edge.end.id != d_node_id:
                 d_angle = self.get_angle(edge.end, self.nodes[d_node_id])
                 d_angle = np.abs((d_angle - edge.angle) % 360 - 180)
-            all_features[i, self.feature_num+1] = d_angle #angle from the destinaiton
+            all_features[i, self.feature_num + 1] = d_angle  # angle from the destinaiton
 
+        if normalize:
+            all_features = self.sc_link.transform(all_features)
         return all_features
+    def set_link_prop(self, **kwargs):
+        super().set_link_prop(**kwargs)
+
+        features = None
+        for i in range(30):
+            d_node_id = self.nids[np.random.randint(len(self.nids))]
+            tmp_features = self.get_all_feature_matrix(d_node_id)
+            tmp_features = tmp_features.astype(np.float32)
+            if features is None:
+                features = tmp_features
+            else:
+                features = np.concatenate((features, tmp_features), axis=0)
+        self.sc_link.fit(features)  # feature_num + context_num
 
     # functions for inside processing
     def _set_action_edges(self):
@@ -369,14 +435,25 @@ class NetworkGNN(NetworkBase):
         super().__init__(*args, **kwargs)
         self._set_laplacian_matrix()
 
-    def get_feature_matrix(self):
+        self.sc_link = StandardScaler()
+
+    def get_feature_matrix(self, normalize=False):
         # feature of all edges (link_num, feature_num)
         feature_mat = np.zeros((len(self.edges), self.feature_num), dtype=np.float32)
         for i, edge in enumerate(self.edges.values()):
             for j, link_prop in enumerate(self.link_props):
                 if link_prop in edge.prop:
                     feature_mat[i, j] = edge.prop[link_prop]
+
+        if normalize:
+            feature_mat = self.sc_link.transform(feature_mat)
         return feature_mat
+
+    def set_link_prop(self, **kwargs):
+        super().set_link_prop(**kwargs)
+
+        feature_mat = self.get_feature_matrix()
+        self.sc_link.fit(feature_mat)
 
     # functions for inside processing
     def _set_laplacian_matrix(self):
@@ -391,11 +468,10 @@ class NetworkGNN(NetworkBase):
         self.laplacian_matrix = self.d_matrix - self.a_matrix
 
         d_inv_half = np.diag(np.power(np.diag(self.d_matrix + (self.d_matrix == 0)), -0.5))
-        self.norm_laplacian_matrix = np.identity(len(self.edges)) - np.matmul(np.matmul(d_inv_half, self.a_matrix), d_inv_half)
+        self.norm_laplacian_matrix = np.identity(len(self.edges)) - np.matmul(np.matmul(d_inv_half, self.a_matrix),
+                                                                              d_inv_half)
 
         d_plus = np.identity(len(self.edges)) + self.d_matrix
         a_plus = np.identity(len(self.edges)) + self.a_matrix
         d_plus_inv_half = np.diag(np.power(np.diag(d_plus), -0.5))  # (I+D)^-0.5
         self.renorm_laplacian_matrix = np.matmul(np.matmul(d_plus_inv_half, a_plus), d_plus_inv_half)
-
-
