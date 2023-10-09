@@ -351,17 +351,17 @@ def calc_loss(model, dataset, dataloader, loss_fn, device, optimizer=None, sched
             if not model_additional is None:
                 y_add, y2_add = _get_y_y2(model_additional, img_tensor, transformed, mask, idx_transformed, dataset)
                 loss_add = loss_fn(y_add, y2_add, **loss_fn_kwargs) # loss for additional file
-                loss_add += loss_fn(y, y_add, **loss_fn_kwargs) # loss between file and additional
+                loss_add = loss_add + loss_fn(y, y_add, **loss_fn_kwargs) # loss between file and additional
                 if not optimizer_additional is None:
                     loss_add.backward(retain_graph=True)
                     optimizer_additional.step()
-                loss += loss_fn(y, y_add, **loss_fn_kwargs) # loss between file and additional
+                loss = loss + loss_fn(y, y_add, **loss_fn_kwargs) # loss between file and additional
             else:
                 y_add, y2_add = _get_y_y2(model, img_tensor, transformed, mask, idx_transformed, dataset)
-                loss += loss_fn(y, y2, **loss_fn_kwargs) # loss for additional file
-                loss += loss_fn(y, y_add, **loss_fn_kwargs) # loss between file and additional
+                loss = loss + loss_fn(y, y2, **loss_fn_kwargs) # loss for additional file
+                loss = loss + loss_fn(y, y_add, **loss_fn_kwargs) # loss between file and additional
         if one_hot_tensor.max() > 0:
-            loss += loss_fn(y, one_hot_tensor, **loss_fn_kwargs)
+            loss = loss + loss_fn(y, one_hot_tensor, **loss_fn_kwargs)
 
         if not optimizer is None:
             loss.backward(retain_graph=True)

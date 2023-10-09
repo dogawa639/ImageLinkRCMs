@@ -447,7 +447,7 @@ class BasicBlock(nn.Module):
         if self.downsample is not None:
             identity = self.downsample(x)
 
-        out += identity
+        out = out + identity
         out = self.relu(out)
 
         return out
@@ -505,7 +505,7 @@ class Bottleneck(nn.Module):
         if self.downsample is not None:
             identity = self.downsample(x)
 
-        out += identity
+        out = out + identity
         out = self.relu(out)
 
         return out
@@ -1234,7 +1234,7 @@ class InvertedResidual(nn.Module):
     def forward(self, input: Tensor) -> Tensor:
         result = self.block(input)
         if self.use_res_connect:
-            result += input
+            result = result + input
         return result
 
 
