@@ -21,6 +21,7 @@ import datetime
 import os
 
 from util import MapSegmentation
+from preprocessing.pp_processing import PP
 
 __all__ = ["GridDataset", "PPEmbedDataset", "ImageDataset", "calc_loss"]
 
@@ -29,6 +30,9 @@ class GridDataset(Dataset):
     # 3*3 grid choice set
     def __init__(self, pp_data, nw_data, normalize=True):
         # nw_data: NWDataCNN
+        self.pp_data = pp_data
+        self.nw_data = nw_data
+
         f = nw_data.feature_num
         c = nw_data.context_feature_num
         # inputs: [sum(sample_num), f+c, 3, 3]
@@ -74,6 +78,11 @@ class GridDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.inputs[idx], self.masks[idx], self.next_links[idx]  # [f+c, 3, 3], [9], [9]
+    
+    def split_into(self, ratio):
+        # ratio: [train, test, validation]
+        pp_data = self.pp_data.split_into(ratio)
+        return [GridDataset(pp_data[i], self.nw_data) for i in range(len(ratio))]
 
 
 class PPEmbedDataset(Dataset):
@@ -92,7 +101,7 @@ class PPEmbedDataset(Dataset):
         return len(self.pp_data)
     
     def __getitem__(self, idx):
-        return self.grobal_state + self.pp_pos_embeddings[idx].toarray(), self.pp_adj_matrices[idx].toarray()  # [link_num, feature_num], [link_num, link_num]
+        return tensor(self.grobal_state + self.pp_pos_embeddings[idx].toarray(), dtype=torch.float32), tensor(self.pp_adj_matrices[idx].toarray(), dtype=torch.float32)  # [link_num, feature_num], [link_num, link_num]
 
     def get_pp_pos_embedding(self, path):
         # path: [link_id] or [edge obj]
@@ -121,6 +130,52 @@ class PPEmbedDataset(Dataset):
         adj_matrix = coo_matrix((np.ones(len(row)), (row, col)), shape=(self.link_num, self.link_num), dtype=np.float32).to_csr()
         return adj_matrix
     
+    def get_dataset_from_adj(self, adj_matrix):
+        # adj_matrix: [trip_num, link_num, link_num] tensor(cpu, detached) each element is real
+        # return: PPEmbedDataset
+        origin = (adj_matrix.sum(axis=1, keepdim=False) > 0) & (adj_matrix.sum(axis=2, keepdim=False) == 0)  # どこからも入ってきていないが，出ていっているリンク (trip_num, link_num)
+        origin = origin[(origin.sum(axis=1) > 0), :]  # originがないtripは除く
+        trip_num = origin.shape[0]
+
+        origin = torch.einsum('ijk, ij -> ij', adj_matrix, origin)
+        origin = torch.where(origin > 0, origin, tensor(-9e15, dtype=torch.float32, device=adj_matrix.device))
+        origin_prob = origin.softmax(dim=1)  # (trip_num, link_num)
+
+        paths = [[] for i in range(trip_num)]
+        path_links = [{} for i in range(trip_num)]
+        prev_idxs = [None for i in range(trip_num)]
+
+        for i in range(trip_num):
+            origin_idx = torch.multinomial(origin_prob[i, :], num_samples=1)  # (1,)
+            paths[i].append(self.nw_data.lids[origin_idx.item()])
+            path_links[i].add(origin_idx.item())
+            prev_idxs[i] = origin_idx.item()
+
+        goon = False
+        for _ in range(adj_matrix.shape[1]):
+            for i in range(trip_num):
+                prev_idx = prev_idxs[i]
+                if adj_matrix[i, prev_idx, :].sum() == 0:  # 次に移動するリンクがない場合
+                    continue
+                next_prob = adj_matrix[i, prev_idx, :].softmax(dim=0)  # (link_num,)
+                next_idx = torch.multinomial(next_prob, num_samples=1)  # (1,)
+                if next_idx in path_links[i]:  # すでに通ったリンクの場合
+                    continue
+                paths[i].append(self.nw_data.lids[next_idx.item()])
+                path_links[i].add(next_idx.item())
+                prev_idxs[i] = next_idx.item()
+                goon = True
+            if not goon:
+                break
+        pp_data = [[i+1, paths[i][j], paths[i][j+1], paths[i][-1]] for i in range(trip_num) for j in range(len(paths[i]) - 1)]  # ID, a, k, b
+        pp_data = PP(pd.DataFrame(pp_data, columns=["ID", "a", "k", "b"]), self.nw_data)
+
+        return PPEmbedDataset(pp_data, self.grobal_state, self.nw_data)
+
+    def split_into(self, ratio):
+        # ratio: [train, test, validation]
+        pp_data = self.pp_data.split_into(ratio)
+        return [PPEmbedDataset(pp_data[i], self.grobal_state, self.nw_data) for i in range(len(ratio))]
 
 class ImageDataset(Dataset):
     # for unsupervised learning

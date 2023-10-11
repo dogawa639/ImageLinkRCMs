@@ -5,9 +5,11 @@ import matplotlib.pyplot as plt
 __all__ = ["PP"]
 
 class PP:
-    def __init__(self, data_file, network):
+    def __init__(self, data, network):
         # all property of network is already set.
-        self.data = pd.read_csv(data_file)  # [ID, a, k, b(last link)]
+        if type(data) == str:
+            data = pd.read_csv(data)  # [ID, a, k, b(last link)]
+        self.data = data  # [ID, a, k, b(last link)]
         self.network = network
 
         self.path_dict = PP.get_path_dict(self.data, self.network)  # {"tid": {"path": [link_id], "d_node": node_id}}
@@ -27,6 +29,26 @@ class PP:
 
             yield edge_list
             idx += 1
+
+    def split_into(self, ratio):
+        # ratio: [train, val, test] sum = 1
+        if sum(ratio) != 1:
+            raise ValueError("The sum of ratio must be 1.")
+        trip_nums = (len(self.path_dict) * np.array(ratio)).astype(int)
+        trip_nums = trip_nums.cumsum()
+        tids_shuffled = np.random.permutation(self.tids)
+        result = []
+        for i in range(len(ratio)):
+            if i == 0:
+                tmp_tids = set(tids_shuffled[:trip_nums[i]])
+            else:
+                tmp_tids = set(tids_shuffled[trip_nums[i - 1]:trip_nums[i]])
+            tmp_data = self.data.loc[self.data["ID"].isin(tmp_tids), :]
+            tmp_pp = PP(tmp_data, self.network)
+            result.append(tmp_pp)
+        return result
+
+
 
     @staticmethod
     def get_path_dict(data, network):
