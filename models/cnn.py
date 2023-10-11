@@ -6,6 +6,7 @@ import torch.nn.functional as F
 
 __all__ = ["CNN2L", "CNN2LPositive", "CNN2LNegative"]
 
+
 class CNN2L(nn.Module):
     def __init__(self, input_channel, output_channel):
         # forward: (B, C, 3, 3)->(B, C', 3, 3)

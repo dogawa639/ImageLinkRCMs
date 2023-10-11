@@ -462,8 +462,8 @@ class NetworkGNN(NetworkBase):
     # functions for inside processing
     def _set_laplacian_matrix(self):
         # 位置エンコーディング用 (線グラフ)
-        self.d_matrix = csr_matrix((len(self.edges), len(self.edges)), dtype=np.float32)
-        self.a_matrix = csr_matrix((len(self.edges), len(self.edges)), dtype=np.float32)
+        self.d_matrix = csr_matrix((len(self.edges), len(self.edges)), dtype=np.float32)  # 次数行列
+        self.a_matrix = csr_matrix((len(self.edges), len(self.edges)), dtype=np.float32)  # 隣接行列
         lid2idx = {lid: i for i, lid in enumerate(self.lids)}
         for i, edge in enumerate(self.edges.values()):
             for edge_down in edge.end.downstream:

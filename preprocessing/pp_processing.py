@@ -49,7 +49,6 @@ class PP:
         return result
 
 
-
     @staticmethod
     def get_path_dict(data, network):
         # data is soreted by ID and time

@@ -20,7 +20,7 @@ import datetime
 
 import os
 
-from util import MapSegmentation
+from utility import MapSegmentation
 from preprocessing.pp_processing import PP
 
 __all__ = ["GridDataset", "PPEmbedDataset", "ImageDataset", "calc_loss"]
@@ -69,9 +69,9 @@ class GridDataset(Dataset):
             masks = np.concatenate((masks, trip_mask), axis=0)
             next_links = np.concatenate((next_links, trip_next_link), axis=0)
 
-        self.inputs = inputs
-        self.masks = masks
-        self.next_links = next_links
+        self.inputs = tensor(inputs, retain_grad=False)
+        self.masks = tensor(masks, retain_grad=False)
+        self.next_links = tensor(next_links, retain_grad=False)
 
     def __len__(self):
         return len(self.inputs)
@@ -86,13 +86,14 @@ class GridDataset(Dataset):
 
 
 class PPEmbedDataset(Dataset):
-    # Grobal state (link_num, graph_node_feature_num) + PP pos embedding, PP adj matrix (link_num, link_num)
-    def __init__(self, pp_data, grobal_state, nw_data):
+    # nw_data: NWDataGNN
+    # Global state (link_num, graph_node_feature_num) + PP pos embedding, PP adj matrix (link_num, link_num)
+    def __init__(self, pp_data, global_state, nw_data):
         # grobal state: output of GNN
         self.pp_data = pp_data
-        self.grobal_state = grobal_state
+        self.global_state = global_state
         self.nw_data = nw_data
-        self.link_num, self.feature_num = grobal_state.shape
+        self.link_num, self.feature_num = global_state.shape
 
         self.pp_pos_embeddings = [self.get_pp_pos_embedding(path) for path in pp_data.load_edge_list()]
         self.pp_adj_matrices = [self.get_pp_adj_matrix(path) for path in pp_data.load_edge_list()]
@@ -101,7 +102,11 @@ class PPEmbedDataset(Dataset):
         return len(self.pp_data)
     
     def __getitem__(self, idx):
-        return tensor(self.grobal_state + self.pp_pos_embeddings[idx].toarray(), dtype=torch.float32), tensor(self.pp_adj_matrices[idx].toarray(), dtype=torch.float32)  # [link_num, feature_num], [link_num, link_num]
+        kargs = {"dtype": torch.float32, "retain_grad": False}
+        # [link_num, feature_num], [link_num, link_num]
+        return (tensor(self.global_state + self.pp_pos_embeddings[idx].toarray(), **kargs).to_sparse(),
+                tensor(self.nw_data.a_matrix.toarray(), **kargs).to_sparse(),  #隣接行列
+                tensor(self.pp_adj_matrices[idx].toarray(), **kargs).to_sparse())
 
     def get_pp_pos_embedding(self, path):
         # path: [link_id] or [edge obj]
@@ -177,6 +182,7 @@ class PPEmbedDataset(Dataset):
         pp_data = self.pp_data.split_into(ratio)
         return [PPEmbedDataset(pp_data[i], self.grobal_state, self.nw_data) for i in range(len(ratio))]
 
+
 class ImageDataset(Dataset):
     # for unsupervised learning
     def __init__(self, files, additional_files=None, output_files=None, input_shape=(520, 520), num_sample=200):
@@ -250,7 +256,6 @@ class ImageDataset(Dataset):
 
     def resplit_data(self):
         self._split_data(num_sample=self.num_sample)
-    
 
     def _load_data(self):
         input_tensors = []
@@ -267,7 +272,7 @@ class ImageDataset(Dataset):
             input_tensor = preprocess(input_image)  # (3, H, W)
             input_tensors.append(input_tensor)
         # additional input
-        if not self.additional_files is None:
+        if self.additional_files is not None:
             for file in self.additional_files:
                 input_image = Image.open(file)
                 input_image = input_image.convert("RGB")
@@ -284,7 +289,7 @@ class ImageDataset(Dataset):
         # output file (supervised)
         output_tensors = []
         self.map_seg = None
-        if not self.output_files is None:
+        if self.output_files is not None:
             map_seg = MapSegmentation(self.output_files)
             self.map_seg = map_seg
             for file in self.output_files:

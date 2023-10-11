@@ -3,8 +3,10 @@ from torch import tensor, nn
 
 __all__ = ["Softplus", "log"]
 
+
 def log(x):
     return torch.log(torch.clip(x, min=1e-6))
+
 
 class Softplus(nn.Module):
     def __init__(self):
