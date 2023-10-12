@@ -30,6 +30,7 @@ class GATBlock(nn.Module):
         n = x.shape[0]
         x_norm = self.layer_norm1(x)
         h_next = torch.zeros((n, self.out_channel), device=x.device)
+        atten_agg = None
         for i in range(self.k):
             h = self.ff0[i](x_norm)  # (node_num, in_channel)
 
@@ -47,8 +48,11 @@ class GATBlock(nn.Module):
             attentioned = self.layer_norm2(attentioned)
 
             h_next = h_next + F.elu(self.ff1[i](attentioned)) / self.k  # (node_num, out_channel)
-        return h_next
-
+            if atten_agg is None:
+                atten_agg = atten.clone().detach() / self.k
+            else:
+                atten_agg = atten_agg + atten.clone().detach() / self.k
+        return h_next, atten_agg
 
 
 class GAT(nn.Module):
@@ -65,9 +69,14 @@ class GAT(nn.Module):
         self.gat_blocks = nn.ModuleList([GATBlock(in_channel, out_channel, **kwargs)] + [GATBlock(out_channel, out_channel, **kwargs) for _ in range(depth - 1)])
 
     def forward(self, x, adj):
+        atten = None
         for gat_block in self.gat_blocks:
-            x = gat_block(x, adj)
-        return x
+            x, atten_agg = gat_block(x, adj)
+            if atten is None:
+                atten = atten_agg
+            else:
+                atten = torch.einsum("ij, jk -> ik", atten_agg, atten)
+        return x, atten
     
 
 class GTBlock(nn.Module):
@@ -97,6 +106,7 @@ class GTBlock(nn.Module):
             x = x + self.ff_enc(enc)  # (node_num, in_channel)
         x_norm = self.layer_norm1(x)
         h_next = torch.zeros((n, self.out_channel), device=x.device)
+        atten_agg = None
         for i in range(self.k):
             h = self.ff0[i](x_norm)  # (node_num, in_channel)
 
@@ -112,6 +122,10 @@ class GTBlock(nn.Module):
             attentioned = self.layer_norm2(attentioned)
 
             h_next = h_next + F.elu(self.ff1[i](attentioned)) / self.k  # (node_num, out_channel)
+            if atten_agg is None:
+                atten_agg = atten.clone().detach() / self.k
+            else:
+                atten_agg = atten_agg + atten.clone().detach() / self.k
         return h_next
 
 
@@ -130,10 +144,15 @@ class GT(nn.Module):
         self.gt_blocks = nn.ModuleList([GTBlock(in_channel, out_channel, **kwargs)] + [GATBlock(out_channel, out_channel, **kwargs) for _ in range(depth - 1)])
 
     def forward(self, x, enc):
+        atten = None
         for i, gt_block in enumerate(self.gt_blocks):
             if i == 0:
-                x = gt_block(x, enc)
+                x, atten_agg = gt_block(x, enc)
             else:
-                x = gt_block(x)
-        return x
+                x, atten_agg = gt_block(x)
+            if atten is None:
+                atten = atten_agg
+            else:
+                atten = torch.einsum("ij, jk -> ik", atten_agg, atten)
+        return x, atten
     
