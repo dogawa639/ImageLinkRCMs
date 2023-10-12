@@ -99,8 +99,8 @@ class GAN:
                 self.discriminator.eval()
                 for batch_real in dataloader_val:
                     raw_data_fake, batch_fake = self.generator.generate(batch_size, i)
-                    d_real = self.discriminator.get_d(batch_real)
-                    d_fake = self.discriminator.get_d(batch_fake)
+                    d_real = self.get_d(batch_real)
+                    d_fake = self.get_d(batch_fake)
                     loss_g, loss_d = self.loss(raw_data_fake, d_real, d_fake, self.hinge_loss)
 
                     mode_loss_g_val.append(loss_g.detach().cpu().item())

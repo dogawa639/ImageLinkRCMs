@@ -84,6 +84,12 @@ class GridDataset(Dataset):
         pp_data = self.pp_data.split_into(ratio)
         return [GridDataset(pp_data[i], self.nw_data) for i in range(len(ratio))]
 
+    def get_fake_batch(self, real_batch, g_output):
+        mask = real_batch[1]
+        next_link_prob = F.softmax(g_output * mask, dim=-1)
+        next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()
+        next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
+        return real_batch[0], real_batch[1], next_links_one_hot
 
 class PPEmbedDataset(Dataset):
     # nw_data: NWDataGNN
@@ -182,6 +188,12 @@ class PPEmbedDataset(Dataset):
         pp_data = self.pp_data.split_into(ratio)
         return [PPEmbedDataset(pp_data[i], self.grobal_state, self.nw_data) for i in range(len(ratio))]
 
+    def get_fake_batch(self, real_batch, g_output):
+        mask = real_batch[1]
+        next_link_prob = F.softmax(g_output * mask, dim=-1)
+        next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()
+        next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
+        return real_batch[0], real_batch[1], next_links_one_hot
 
 class ImageDataset(Dataset):
     # for unsupervised learning
