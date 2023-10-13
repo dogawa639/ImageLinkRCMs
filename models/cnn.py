@@ -4,7 +4,7 @@ import torch
 from torch import tensor, nn
 import torch.nn.functional as F
 
-__all__ = ["CNN2L", "CNN2LPositive", "CNN2LNegative"]
+__all__ = ["CNN2L", "CNN2LDepth", "CNN2LPositive", "CNN2LNegative"]
 
 
 class CNN2L(nn.Module):
@@ -46,7 +46,27 @@ class CNN2L(nn.Module):
         y = self.sequence1(x)
         y = self.sequence2(y)
         return self.sequence3(torch.cat([y, x], dim=1))
-    
+
+
+class CNN2LDepth(nn.Module):
+    def __init__(self, input_channel, output_channel):
+        # forward: (B, C, 3, 3)->(B, C', 3, 3)
+        super().__init__()
+
+        self.input_channel = input_channel
+        self.output_channel = output_channel
+
+        self.cov1 = nn.Conv2d(self.input_channel, self.input_channel*16, 1, padding=0, bias=False)
+        self.cov2 = nn.Conv2d(self.input_channel*16, self.output_channel, 1, padding=0, bias=False)
+
+        self.sequence = nn.Sequential(
+            self.cov1,
+            self.cov2
+        )
+
+    def forward(self, x):
+        return self.sequence(x)
+
 
 class CNN2LPositive(CNN2L):
     def __init__(self, *args, **kwards):

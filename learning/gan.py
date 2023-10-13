@@ -21,16 +21,18 @@ from models.general import log
 
 
 class GAN:
-    def __init__(self, generator, discriminator, datasets, model_dir,
-                 airl=True, hinge_loss=False, hinge_thresh=-1.0, device="cpu"):
+    def __init__(self, generator, discriminator, datasets, model_dir, use_global_state=False,
+                 airl=True, hinge_loss=False, hinge_thresh=-1.0, device="cpu", sln=False):
         self.generator = generator
         self.discriminator = discriminator
         self.datasets = datasets  # list of Dataset  train&validation
         self.model_dir = model_dir
+        self.use_global_state = use_global_state
         self.airl = airl
         self.hinge_loss = hinge_loss
         self.hinge_thresh = tensor(hinge_thresh, dtype=torch.float32, device=device, requires_grad=False)
         self.device = device
+        self.sln = sln
     
     def train(self, epochs, batch_size, lr_g, lr_d, shuffle,
               train_ratio=0.8, d_epoch=5, image_file=None):
@@ -63,12 +65,18 @@ class GAN:
                     # raw_data retain_grad=True
                     # Grid: (sum(links), 3, 3) corresponds to next_links
                     # Emb: (trip_num, link_num, link_num) sparse corresponds to transition_matrix
-                    self.generator.zero_grad()
-                    raw_data_fake, batch_fake = self.generator.generate(batch_size, i)  # batch_fake retain_grad=False
+                    if self.use_global_state:
 
-                    for i in range(len(batch_real)):
-                        batch_real[i] = batch_real[i].to(self.device)
-                        batch_fake[i] = batch_fake[i].to(self.device)
+                    self.generator.zero_grad()
+                    if self.sln:
+                        raw_data_fake, w = self.generator(batch_real[0], i)  # batch_fake retain_grad=False
+                    else:
+                        raw_data_fake = self.generator(batch_real[0], i)  # batch_fake retain_grad=False
+                    fake_batch = self.datasets.get_fake_batch(batch_real, raw_data_fake)
+
+                    for j in range(len(batch_real)):
+                        batch_real[j] = batch_real[j].to(self.device)
+                        batch_fake[j] = batch_fake[j].to(self.device)
                     raw_data_fake.to(self.device)
 
                     # d value: retain_grad=True, same shape as raw_data_fake
