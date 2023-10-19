@@ -33,6 +33,8 @@ class GridDataset(Dataset):
         self.pp_data = pp_data
         self.nw_data = nw_data
 
+        lid2idx = {lid: i for i, lid in enumerate(nw_data.lids)}
+
         f = nw_data.feature_num
         c = nw_data.context_feature_num
         # inputs: [sum(sample_num), f+c, 3, 3]
@@ -41,6 +43,7 @@ class GridDataset(Dataset):
         inputs = np.zeros((0, f + c, 3, 3), dtype=np.float32)
         masks = np.zeros((0, 9), dtype=np.float32)
         next_links = np.zeros((0, 9), dtype=np.float32)
+        link_idxs = np.zeros((0, 9), dtype=np.int64)
         for tid in pp_data.tids:
             path = pp_data.path_dict[tid]["path"]
             d_node_id = pp_data.path_dict[tid]["d_node"]
@@ -50,6 +53,7 @@ class GridDataset(Dataset):
             trip_input = np.zeros((sample_num, f + c, 3, 3), dtype=np.float32)  # [link, state, state]
             trip_mask = np.zeros((sample_num,9), dtype=np.float32)  # [link, mask]
             trip_next_link = np.zeros((sample_num,9), dtype=np.float32)  # [link, one_hot]
+            trip_link_idxs = np.zeros((sample_num,9), dtype=np.int64)  # [link, next_link_idxs]
 
             for i in range(sample_num):
                 tmp_link = path[i]
@@ -61,6 +65,7 @@ class GridDataset(Dataset):
                 trip_input[i, f:f+c, :, :] = context_mat
                 trip_mask[i, :] = [len(edges) > 0 for edges in action_edge]
                 trip_next_link[i, :] = [next_link in edges for edges in action_edge]
+                trip_link_idxs[i, :] = [lid2idx[np.random.choice(edges)] if len(edges) > 0 else 0 for edges in action_edge]
 
             trip_input = trip_input[np.isnan(trip_input).sum(axis=(1, 2, 3)) == 0]
             if len(trip_input) == 0:
@@ -68,16 +73,19 @@ class GridDataset(Dataset):
             inputs = np.concatenate((inputs, trip_input), axis=0)
             masks = np.concatenate((masks, trip_mask), axis=0)
             next_links = np.concatenate((next_links, trip_next_link), axis=0)
+            link_idxs = np.concatenate((link_idxs, trip_link_idxs), axis=0)
 
         self.inputs = tensor(inputs, retain_grad=False)
         self.masks = tensor(masks, retain_grad=False)
         self.next_links = tensor(next_links, retain_grad=False)
+        self.link_idxs = tensor(link_idxs, retain_grad=False)
 
     def __len__(self):
         return len(self.inputs)
 
     def __getitem__(self, idx):
-        return self.inputs[idx], self.masks[idx], self.next_links[idx]  # [f+c, 3, 3], [9], [9]
+        # [f+c, 3, 3], [9], [9], [9]
+        return self.inputs[idx], self.masks[idx], self.next_links[idx], self.link_idxs[idx]
     
     def split_into(self, ratio):
         # ratio: [train, test, validation]
@@ -90,6 +98,7 @@ class GridDataset(Dataset):
         next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()
         next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
         return real_batch[0], real_batch[1], next_links_one_hot
+
 
 class PPEmbedDataset(Dataset):
     # nw_data: NWDataGNN
@@ -194,6 +203,7 @@ class PPEmbedDataset(Dataset):
         next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()
         next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
         return real_batch[0], real_batch[1], next_links_one_hot
+
 
 class ImageDataset(Dataset):
     # for unsupervised learning

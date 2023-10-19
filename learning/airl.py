@@ -20,17 +20,23 @@ from utility import *
 from models.general import log
 
 
-class GAN:
-    def __init__(self, generator, discriminator, datasets, model_dir, use_global_state=False,
-                 airl=True, hinge_loss=False, hinge_thresh=-1.0, device="cpu", sln=False):
+class AIRL:
+    def __init__(self, generator, discriminator, datasets, model_dir,
+                image_data=None, decoder=None, encoder=None, hinge_loss=False, hinge_thresh=0.5, device="cpu", sln=False):
+        if hinge_thresh > 1.0 or hinge_thresh < 0.0:
+            raise ValueError("hinge_thresh must be in [0, 1].")
+        if encoder is not None and image_data is None:
+            raise ValueError("image_data must be set when encoder is not None.")
         self.generator = generator
         self.discriminator = discriminator
         self.datasets = datasets  # list of Dataset  train&validation
         self.model_dir = model_dir
-        self.use_global_state = use_global_state
-        self.airl = airl
+        self.use_encoder = encoder is not None
+        self.encoder = encoder
+        self.decoder = decoder
+        self.image_data = image_data
         self.hinge_loss = hinge_loss
-        self.hinge_thresh = tensor(hinge_thresh, dtype=torch.float32, device=device, requires_grad=False)
+        self.hinge_thresh = -log(tensor(hinge_thresh, dtype=torch.float32, device=device, requires_grad=False))
         self.device = device
         self.sln = sln
     
@@ -169,21 +175,13 @@ class GAN:
         loss_g = []
         loss_d = []
         for g_rate, d_r, d_f in zip(raw_data_fake, d_real, d_fake):
-            if self.airl:
-                if hinge_loss:
-                    l_g = -log(g_rate * d_f) + log(1. - g_rate * d_f)
-                    l_d = torch.max(-log(d_r), self.hinge_thresh) + torch.max(-log(1. - d_f), self.hinge_thresh)
-                else:
-                    l_g = -log(g_rate * d_f) + log(1. - g_rate * d_f)
-                    l_d = -log(d_r) - log(1. - d_f)
-
+            if hinge_loss:
+                l_g = -log(g_rate * d_f) + log(1. - g_rate * d_f)
+                l_d = torch.max(-log(d_r), self.hinge_thresh) + torch.max(-log(1. - d_f), self.hinge_thresh)
             else:
-                if hinge_loss:
-                    l_g = -log(g_rate * d_f)
-                    l_d = torch.max(-log(d_r), self.hinge_thresh) + torch.max(-log(1. - d_f), self.hinge_thresh)
-                else:
-                    l_g = -log(g_rate * d_f)
-                    l_d = -log(d_r) - log(1. - d_f)
+                l_g = -log(g_rate * d_f) + log(1. - g_rate * d_f)
+                l_d = -log(d_r) - log(1. - d_f)
+
 
             l_g = l_g.sum()
             l_d = l_d.sum()
