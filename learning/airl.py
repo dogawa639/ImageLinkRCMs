@@ -5,9 +5,6 @@ from torch.optim.lr_scheduler import ConstantLR
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,19 +18,20 @@ from models.general import log
 
 
 class AIRL:
-    def __init__(self, generator, discriminator, datasets, model_dir,
-                image_data=None, decoder=None, encoder=None, hinge_loss=False, hinge_thresh=0.5, device="cpu", sln=False):
+    def __init__(self, generator, discriminator, datasets, model_dir, image_data=None, encoder=None, f0=None,
+                 hinge_loss=False, hinge_thresh=0.5, device="cpu", sln=False):
         if hinge_thresh > 1.0 or hinge_thresh < 0.0:
             raise ValueError("hinge_thresh must be in [0, 1].")
         if encoder is not None and image_data is None:
             raise ValueError("image_data must be set when encoder is not None.")
+
         self.generator = generator
         self.discriminator = discriminator
         self.datasets = datasets  # list of Dataset  train&validation
         self.model_dir = model_dir
         self.use_encoder = encoder is not None
         self.encoder = encoder
-        self.decoder = decoder
+        self.f0 = f0  # h->w
         self.image_data = image_data
         self.hinge_loss = hinge_loss
         self.hinge_thresh = -log(tensor(hinge_thresh, dtype=torch.float32, device=device, requires_grad=False))
@@ -59,8 +57,8 @@ class AIRL:
             epoch_loss_d = []
             for i, (dataloader_train, dataloader_val) in enumerate(dataloaders_real):
                 # batch
-                # Grid: inputs, masks, next_links
-                # Emb: global_state, adj_matrix, transition_matrix
+                # Grid: inputs, masks, next_links, link_idxs, h
+                # Emb: global_state, adj_matrix, transition_matrix, h
                 mode_loss_g = []
                 mode_loss_d = []
                 epoch_loss_d_val = []
@@ -70,12 +68,18 @@ class AIRL:
                 for batch_real in dataloader_train:
                     # raw_data retain_grad=True
                     # Grid: (sum(links), 3, 3) corresponds to next_links
-                    # Emb: (trip_num, link_num, link_num) sparse corresponds to transition_matrix
-                    if self.use_global_state:
+                    # Emb: (trip_num, link_num, link_num) sparse, corresponds to transition_matrix
+                    w = None
+                    self.f0.zero_grad()
+                    if self.f0 is not None:
+                        w = self.f0(batch_real[-1])
+
+                    if self.use_encoder:
+
 
                     self.generator.zero_grad()
                     if self.sln:
-                        raw_data_fake, w = self.generator(batch_real[0], i)  # batch_fake retain_grad=False
+                        raw_data_fake = self.generator(batch_real[0], i, w)  # batch_fake retain_grad=False
                     else:
                         raw_data_fake = self.generator(batch_real[0], i)  # batch_fake retain_grad=False
                     fake_batch = self.datasets.get_fake_batch(batch_real, raw_data_fake)

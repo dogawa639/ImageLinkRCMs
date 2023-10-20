@@ -28,10 +28,11 @@ __all__ = ["GridDataset", "PPEmbedDataset", "ImageDataset", "calc_loss"]
 
 class GridDataset(Dataset):
     # 3*3 grid choice set
-    def __init__(self, pp_data, nw_data, normalize=True):
+    def __init__(self, pp_data, nw_data, h_dim=10, normalize=True):
         # nw_data: NWDataCNN
         self.pp_data = pp_data
         self.nw_data = nw_data
+        self.h_dim = h_dim
 
         lid2idx = {lid: i for i, lid in enumerate(nw_data.lids)}
 
@@ -43,7 +44,8 @@ class GridDataset(Dataset):
         inputs = np.zeros((0, f + c, 3, 3), dtype=np.float32)
         masks = np.zeros((0, 9), dtype=np.float32)
         next_links = np.zeros((0, 9), dtype=np.float32)
-        link_idxs = np.zeros((0, 9), dtype=np.int64)
+        link_idxs = np.zeros((0, 9), dtype=np.int32)
+        hs = np.zeros((0, h_dim), dtype=np.float32)
         for tid in pp_data.tids:
             path = pp_data.path_dict[tid]["path"]
             d_node_id = pp_data.path_dict[tid]["d_node"]
@@ -53,7 +55,7 @@ class GridDataset(Dataset):
             trip_input = np.zeros((sample_num, f + c, 3, 3), dtype=np.float32)  # [link, state, state]
             trip_mask = np.zeros((sample_num,9), dtype=np.float32)  # [link, mask]
             trip_next_link = np.zeros((sample_num,9), dtype=np.float32)  # [link, one_hot]
-            trip_link_idxs = np.zeros((sample_num,9), dtype=np.int64)  # [link, next_link_idxs]
+            trip_link_idxs = np.zeros((sample_num,9), dtype=np.int32)  # [link, next_link_idxs]
 
             for i in range(sample_num):
                 tmp_link = path[i]
@@ -74,18 +76,20 @@ class GridDataset(Dataset):
             masks = np.concatenate((masks, trip_mask), axis=0)
             next_links = np.concatenate((next_links, trip_next_link), axis=0)
             link_idxs = np.concatenate((link_idxs, trip_link_idxs), axis=0)
+            hs = np.concatenate((hs, np.repeat(np.random.randn(1, h_dim), len(trip_input), axis=0)), axis=0)
 
         self.inputs = tensor(inputs, retain_grad=False)
         self.masks = tensor(masks, retain_grad=False)
         self.next_links = tensor(next_links, retain_grad=False)
         self.link_idxs = tensor(link_idxs, retain_grad=False)
+        self.hs = tensor(hs, retain_grad=False)
 
     def __len__(self):
         return len(self.inputs)
 
     def __getitem__(self, idx):
         # [f+c, 3, 3], [9], [9], [9]
-        return self.inputs[idx], self.masks[idx], self.next_links[idx], self.link_idxs[idx]
+        return self.inputs[idx], self.masks[idx], self.next_links[idx], self.link_idxs[idx], self.hs[idx]
     
     def split_into(self, ratio):
         # ratio: [train, test, validation]
@@ -103,15 +107,17 @@ class GridDataset(Dataset):
 class PPEmbedDataset(Dataset):
     # nw_data: NWDataGNN
     # Global state (link_num, graph_node_feature_num) + PP pos embedding, PP adj matrix (link_num, link_num)
-    def __init__(self, pp_data, global_state, nw_data):
-        # grobal state: output of GNN
+    def __init__(self, pp_data, nw_data, h_dim=10):
+        # global state: output of GNN
         self.pp_data = pp_data
-        self.global_state = global_state
         self.nw_data = nw_data
-        self.link_num, self.feature_num = global_state.shape
+        self.feature_mat = nw_data.get_feature_matrix()
+        self.link_num, self.feature_num = self.feature_mat.shape
 
         self.pp_pos_embeddings = [self.get_pp_pos_embedding(path) for path in pp_data.load_edge_list()]
         self.pp_adj_matrices = [self.get_pp_adj_matrix(path) for path in pp_data.load_edge_list()]
+
+        self.hs = torch.randn((len(self.pp_data), h_dim), dtype=torch.float32, requires_grad=False)
 
     def __len__(self):
         return len(self.pp_data)
@@ -119,9 +125,10 @@ class PPEmbedDataset(Dataset):
     def __getitem__(self, idx):
         kargs = {"dtype": torch.float32, "retain_grad": False}
         # [link_num, feature_num], [link_num, link_num]
-        return (tensor(self.global_state + self.pp_pos_embeddings[idx].toarray(), **kargs).to_sparse(),
+        return (tensor(self.feature_mat, **kargs),
                 tensor(self.nw_data.a_matrix.toarray(), **kargs).to_sparse(),  #隣接行列
-                tensor(self.pp_adj_matrices[idx].toarray(), **kargs).to_sparse())
+                tensor(self.pp_adj_matrices[idx].toarray(), **kargs).to_sparse(),
+                tensor(self.hs[idx], **kargs))
 
     def get_pp_pos_embedding(self, path):
         # path: [link_id] or [edge obj]

@@ -9,13 +9,15 @@ import numpy as np
 
 class CNNGen(nn.Module):
     def __init__(self, nw_data, output_channel, max_num=40, device="cpu"):
+        super().__init__()
+
         self.nw_data = nw_data
         self.output_channel = output_channel
         self.max_num = max_num
         self.device = device
 
         self.input_feature = self.nw_data.link_feature_num + self.nw_data.context_feature_num
-        self.cnn = CNN2L(self.input_feature, self.output_channel)
+        self.cnn = CNN2L(self.input_feature, self.output_channel, sln=sln, w_dim=w_dim)
 
     def forward(self, input, i):
         # input: (sum(links), input_feature, 3, 3)
@@ -28,7 +30,7 @@ class CNNGen(nn.Module):
         # generate num paths (the path is stopped after 1000 steps)
         # fake_data: [{pid: {d_node: d_node, path: [link]}}]
         if type(num) == int:
-            num = [num for i in range(self.output_channel)]
+            num = [num for _ in range(self.output_channel)]
         if len(num) != self.output_channel:
             raise Exception("num should be int or list(self.output_channel elements)")
 
@@ -94,6 +96,9 @@ class CNNGen(nn.Module):
 class GNNGen(nn.Module):
     def __init__(self, in_channel, output_channel, device="cpu", h_dim=1, sln=False, w_dim=None):
         super().__init__()
+        if sln and w_dim is None:
+            raise Exception("w_dim should be specified when sln is True")
+
         self.in_channel = in_channel
         self.output_channel = output_channel
         self.device = device
@@ -101,21 +106,16 @@ class GNNGen(nn.Module):
         self.sln = sln
         self.w_dim = w_dim
 
-        if self.sln:
-            self.ff0 = FF(h_dim, w_dim, bias=True)
         self.transformer = Transformer(in_channel, output_channel, k=3, dropout=0.1, depth=3, residual=True, sln=sln, w_dim=w_dim)
 
-    def forward(self, x, num, i):
+    def forward(self, x, i, w=None):
         # x: (link_num, in_channel)
         # enc: (trip_num, enc_dim)
         # output: (trip_num, link_num, link_num)
-        h = torch.randn.randn((num, self.h_dim), dtype=torch.float32, device=self.device)
-        x_rep = x.expand(num, x.shape[0], x.shape[1])
         if self.sln:
-            w = self.ff0(h)
-            return self.transformer(x_rep, None, w)[:, i, :, :], w
+            return self.transformer(x, None, w)[:, i, :, :]
         else:
-            return self.transformer(x_rep, None)[:, i, :, :]
+            return self.transformer(x, None)[:, i, :, :]
 
     def save(self, model_dir):
         torch.save(self.state_dict(), model_dir + "/gnngen.pth")
