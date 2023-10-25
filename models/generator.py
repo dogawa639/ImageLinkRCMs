@@ -94,7 +94,7 @@ class CNNGen(nn.Module):
 
 
 class GNNGen(nn.Module):
-    def __init__(self, in_channel, output_channel, device="cpu", h_dim=1, sln=False, w_dim=None):
+    def __init__(self, in_channel, output_channel, device="cpu", sln=False, w_dim=None):
         super().__init__()
         if sln and w_dim is None:
             raise Exception("w_dim should be specified when sln is True")
@@ -102,7 +102,6 @@ class GNNGen(nn.Module):
         self.in_channel = in_channel
         self.output_channel = output_channel
         self.device = device
-        self.h_dim = h_dim
         self.sln = sln
         self.w_dim = w_dim
 
