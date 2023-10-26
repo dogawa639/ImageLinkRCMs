@@ -209,7 +209,7 @@ class PPEmbedDataset(Dataset):
         next_link_prob = F.softmax(g_output * mask, dim=-1)
         next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()
         next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
-        return real_batch[0], real_batch[1], next_links_one_hot
+        return real_batch[0], real_batch[1], next_links_one_hot, real_batch[3]
 
 
 class ImageDataset(Dataset):

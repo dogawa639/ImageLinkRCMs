@@ -18,7 +18,7 @@ from models.general import log
 
 
 class AIRL:
-    def __init__(self, generator, discriminator, use_index, datasets, model_dir, image_data=None, encoder=None, emb_dim=10, f0=None,
+    def __init__(self, generator, discriminator, use_index, datasets, model_dir, image_data=None, encoder=None, h_dim=10, emb_dim=10, f0=None,
                  hinge_loss=False, hinge_thresh=0.5, device="cpu", sln=False):
         if hinge_thresh > 1.0 or hinge_thresh < 0.0:
             raise ValueError("hinge_thresh must be in [0, 1].")
@@ -32,6 +32,7 @@ class AIRL:
         self.model_dir = model_dir
         self.use_encoder = encoder is not None
         self.encoder = encoder
+        self.h_dim = h_dim
         self.emb_dim = emb_dim
         self.f0 = f0  # h->w
         self.use_w = self.f0 is not None
@@ -42,6 +43,7 @@ class AIRL:
         self.sln = sln
 
         self.link_num = len(self.datasets[0].nw_data.lids)
+        self.output_channel = len(self.datasets)
     
     def train(self, epochs, batch_size, lr_g, lr_d, shuffle,
               train_ratio=0.8, d_epoch=5, lr_f0=0.01, lr_e=0.01, image_file=None):
@@ -245,12 +247,12 @@ class AIRL:
     def cat_image_feature(self, batch, w=None):
         # w: (bs, w_dim)
         # index: (bs, 9)
-        bs = batch.shape[0]
-        image_feature = tensor(np.zeros((self.link_num, self.emb_dim), dtype=np.float32), device=self.device)
+        bs = batch[0].shape[0]
+        image_feature = tensor(np.zeros((bs, self.link_num, self.emb_dim), dtype=np.float32), device=self.device)
         for patches in self.image_data.load_link_patches():
             # patches [image_data]
             for i, patch in enumerate(patches):
-                image_feature[i, :] = image_feature[i, :] + self.encoder(patch, w) / len(self.image_data)  # requires_grad=True
+                image_feature[:, i, :] = image_feature[:, i, :] + self.encoder(patch, w) / len(self.image_data)  # requires_grad=True
 
         # inputs: (bs, c, 3, 3) or (bs, link_num, feature_num)
         if self.use_index:
@@ -259,12 +261,30 @@ class AIRL:
             image_feature_tmp = image_feature[batch[3], :].transpose(1, 2).view(bs, -1, 3, 3)
             inputs = torch.cat((inputs, image_feature_tmp), dim=1)
         else:
-            image_feature_tmp = image_feature.expand(bs, self.link_num, self.emb_dim)
             inputs = torch.cat((inputs, image_feature_tmp), dim=2)
 
         batch[0] = inputs
         return batch
-    
+
+    def generate(self, bs):
+        # only for gnn
+        if not self.use_encoder or self.use_index:
+            raise Exception("This method is only for GNNEmb.")
+        self.eval()
+        hs = torch.randn(bs, self.h_dim, device=self.device)
+        w = None
+        if self.use_w:
+            w = self.f0(hs)
+
+        inputs = [tensor(self.real_data.feature_matrix, dtype=torch.float32, device=self.device).repeat(bs, 1, 1)]
+        if self.use_encoder:
+            # append image_feature to the original feature
+            inputs = self.cat_image_feature(inputs, w=w)
+        inputs = inputs[0]  # (bs, link_num, feature_num)
+        adj_matrix = self.generator(inputs, None, w=w)  # (bs, oc, link_num, link_num)
+        datasets = [self.datasets[i].get_dataset_from_adj(adj_matrix[:, i, :, :]) for i in range(self.output_channel)]
+        return datasets
+
     def train(self):
         self.generator.train()
         self.discriminator.train()

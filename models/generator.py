@@ -8,7 +8,7 @@ from general import FF, SLN
 import numpy as np
 
 class CNNGen(nn.Module):
-    def __init__(self, nw_data, output_channel, max_num=40, device="cpu"):
+    def __init__(self, nw_data, output_channel, max_num=40, sln=True, w_dim=10, device="cpu"):
         super().__init__()
 
         self.nw_data = nw_data
@@ -17,7 +17,7 @@ class CNNGen(nn.Module):
         self.device = device
 
         self.input_feature = self.nw_data.link_feature_num + self.nw_data.context_feature_num
-        self.cnn = CNN2L(self.input_feature, self.output_channel, sln=sln, w_dim=w_dim)
+        self.cnn = CNN2L(self.input_feature, self.output_channel, sln=sln, w_dim=w_dim)  # forward: (B, C, 3, 3)->(B, C', 3, 3)
 
     def forward(self, input, i):
         # input: (sum(links), input_feature, 3, 3)
@@ -27,7 +27,6 @@ class CNNGen(nn.Module):
 
     def generate(self, num):
         # num: int or list(self.output_channel elements)
-        # generate num paths (the path is stopped after 1000 steps)
         # fake_data: [{pid: {d_node: d_node, path: [link]}}]
         if type(num) == int:
             num = [num for _ in range(self.output_channel)]
@@ -45,7 +44,7 @@ class CNNGen(nn.Module):
             bs = len(pids)
             input = tensor(np.zeros((bs, self.link_feature_num + self.context_feature_num, 3, 3), dtype=np.float32),
                            device=self.device)
-            masks = tensor(np.zeros((bs, 9, 1), dtype=np.float32), device=self.device)
+            masks = tensor(np.zeros((bs, 1, 9), dtype=np.float32), device=self.device)
             action_edges = []
             for idx, pid in enumerate(pids):
                 feature_mat, _ = self.nw_data.get_feature_matrix(paths[pid][-1])
@@ -54,13 +53,13 @@ class CNNGen(nn.Module):
                               device=self.device)
 
                 input[idx, :, :, :] = tensor(np.concatenate((feature_mat, context_mat), axis=0).astype(np.float32))
-                masks[idx, :, 0] = mask
+                masks[idx, 0, :] = mask
                 action_edges.append(action_edge)
 
-            pi = torch.where(masks, self.cnn(input), tensor(-9e15, dtype=torch.float32, device=self.device))  # [bs ,9, oc]
+            pi = torch.where(masks, self.cnn(input), tensor(-9e15, dtype=torch.float32, device=self.device))  # [bs , oc, 9]
             pi_mode = tensor(np.zeros((bs, 9), dtype=np.float32), device=self.device)
             for j in range(bs):
-                pi_mode[j, :] = pi[j, :, mode[j]]
+                pi_mode[j, :] = pi[j, mode[j], :]
             pi = pi_mode
             pi[:, 4] = tensor(-9e15, dtype=torch.float32, device=self.device)
 
@@ -110,7 +109,12 @@ class GNNGen(nn.Module):
     def forward(self, x, i, w=None):
         # x: (link_num, in_channel)
         # enc: (trip_num, enc_dim)
-        # output: (trip_num, link_num, link_num)
+        # output: (trip_num, link_num, link_num) or (trip_num, oc, link_num, link_num)
+        if i == None:
+            if self.sln:
+                return self.transformer(x, None, w)
+            else:
+                return self.transformer(x, None)
         if self.sln:
             return self.transformer(x, None, w)[:, i, :, :]
         else:
