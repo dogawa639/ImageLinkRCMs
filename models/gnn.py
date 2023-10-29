@@ -4,7 +4,7 @@ from torch.nn import functional as F
 
 from .general import Softplus
 
-__all__ = ["GAT", "GATBlock"]
+__all__ = ["GAT", "GT"]
 
 
 class GATBlock(nn.Module):

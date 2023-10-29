@@ -3,13 +3,15 @@ from models.general import *
 import torch
 from torch import tensor, nn
 import torch.nn.functional as F
+from torch.nn.utils import spectral_norm
 
 __all__ = ["CNN2L", "CNN2LDepth", "CNN2LPositive", "CNN2LNegative"]
 
 
 class CNN2L(nn.Module):
-    def __init__(self, input_channel, output_channel, residual=True, sln=False, w_dim=None):
+    def __init__(self, input_channel, output_channel, residual=True, sn=False, sln=False, w_dim=None):
         # forward: (B, C, 3, 3)->(B, C', 3, 3)
+        # sn: spectral normalization, sln: self-modulated layer normalization
         super().__init__()
         if sln and w_dim is None:
             raise Exception("w_dim should be specified when sln is True")
@@ -17,14 +19,21 @@ class CNN2L(nn.Module):
         self.input_channel = input_channel
         self.output_channel = output_channel
         self.residual = residual
+        self.sn = sn
         self.sln = sln
         self.w_dim = w_dim
 
         # convolution
-        self.cov1 = nn.Conv2d(self.input_channel, self.input_channel*8, 3, padding=1, bias=False)#(bs, in_channel, 3, 3)->(bs, in_channel*8, 3, 3)
-        self.cov2 = nn.Conv2d(self.input_channel*8, self.input_channel*16, 3, padding=1, bias=False)#(bs, in_channel*8, 3, 3)->(bs, in_channel*32, 3, 3)
-        # fully connected(1x1 convolution)
-        self.fc1 = nn.Conv2d(self.input_channel*16, self.input_channel, 1, padding=0, bias=False)  #(bs, in_channel*16, 3, 3)->(bs, in_channel, 3, 3)
+        if not sn:
+            self.cov1 = nn.Conv2d(self.input_channel, self.input_channel*8, 3, padding=1, bias=False) #(bs, in_channel, 3, 3)->(bs, in_channel*8, 3, 3)
+            self.cov2 = nn.Conv2d(self.input_channel*8, self.input_channel*16, 3, padding=1, bias=False) #(bs, in_channel*8, 3, 3)->(bs, in_channel*32, 3, 3)
+            # fully connected(1x1 convolution)
+            self.fc1 = nn.Conv2d(self.input_channel*16, self.input_channel, 1, padding=0, bias=False) #(bs, in_channel*16, 3, 3)->(bs, in_channel, 3, 3)
+        else:
+            self.cov1 = spectral_norm(nn.Conv2d(self.input_channel, self.input_channel*8, 3, padding=1, bias=False)) #(bs, in_channel, 3, 3)->(bs, in_channel*8, 3, 3)
+            self.cov2 = spectral_norm(nn.Conv2d(self.input_channel*8, self.input_channel*16, 3, padding=1, bias=False)) #(bs, in_channel*8, 3, 3)->(bs, in_channel*32, 3, 3)
+            # fully connected(1x1 convolution)
+            self.fc1 = spectral_norm(nn.Conv2d(self.input_channel*16, self.input_channel, 1, padding=0, bias=False)) #(bs, in_channel*16, 3, 3)->(bs, in_channel, 3, 3)
         self.fc2 = nn.Conv2d(self.input_channel + self.input_channel * residual, self.output_channel, 1, padding=0, bias=False)  #(bs, in_channel*2, 3, 3)->(bs, oc, 3, 3)
 
         if not sln:
@@ -72,7 +81,7 @@ class CNN2L(nn.Module):
 
 
 class CNN2LDepth(nn.Module):
-    def __init__(self, input_channel, output_channel, sln=False, w_dim=None):
+    def __init__(self, input_channel, output_channel, sn=False, sln=False, w_dim=None):
         # forward: (B, C, 3, 3)->(B, C', 3, 3)
         super().__init__()
         if sln and w_dim is None:
@@ -80,6 +89,7 @@ class CNN2LDepth(nn.Module):
 
         self.input_channel = input_channel
         self.output_channel = output_channel
+        self.sn = sn
         self.sln = sln
         self.w_dim = w_dim
 
@@ -88,8 +98,12 @@ class CNN2LDepth(nn.Module):
         else:
             self.layer_norm = SLN(self.w_dim, self.in_channel)
 
-        self.cov1 = nn.Conv2d(self.input_channel, self.input_channel*16, 1, padding=0, bias=False)
-        self.cov2 = nn.Conv2d(self.input_channel*16, self.output_channel, 1, padding=0, bias=False)
+        if not sn:
+            self.cov1 = nn.Conv2d(self.input_channel, self.input_channel*16, 1, padding=0, bias=False)
+            self.cov2 = nn.Conv2d(self.input_channel*16, self.output_channel, 1, padding=0, bias=False)
+        else:
+            self.cov1 = spectral_norm(nn.Conv2d(self.input_channel, self.input_channel*16, 1, padding=0, bias=False))
+            self.cov2 = spectral_norm(nn.Conv2d(self.input_channel*16, self.output_channel, 1, padding=0, bias=False))
 
         self.sequence = nn.Sequential(
             self.cov1,

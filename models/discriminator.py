@@ -17,9 +17,9 @@ class CNNDis(nn.Module):
         self.device = device
 
         self.input_feature = self.nw_data.link_feature_num + self.nw_data.context_feature_num
-        self.util = CNN2LNegative(self.input_feature, self.output_channel)
-        self.ext = CNN2LNegative(self.input_feature, self.output_channel)
-        self.val = CNN2LDepth(self.input_feature, self.output_channel)
+        self.util = CNN2LNegative(self.input_feature, self.output_channel, sn=True)
+        self.ext = CNN2LNegative(self.input_feature, self.output_channel, sn=True)
+        self.val = CNN2LDepth(self.input_feature, self.output_channel, sn=True)
 
     def forward(self, input, i):
         # input: (sum(links), input_feature, 3, 3)
@@ -49,11 +49,11 @@ class GNNDis(nn.Module):
 
         if self.sln:
             self.ff0 = FF(h_dim, w_dim, bias=True)
-        self.util = Transformer(in_channel, output_channel, k=3, dropout=0.1, depth=3, residual=True, sln=sln,
+        self.util = Transformer(in_channel, output_channel, k=3, dropout=0.1, depth=3, residual=True, sn=True, sln=sln,
                                        w_dim=w_dim)
-        self.ext = Transformer(in_channel, output_channel, k=3, dropout=0.1, depth=3, residual=True, sln=sln,
+        self.ext = Transformer(in_channel, output_channel, k=3, dropout=0.1, depth=3, residual=True, sn=True, sln=sln,
                                         w_dim=w_dim)
-        self.val = Transformer(in_channel, 1, k=3, dropout=0.1, depth=3, residual=True, sln=sln,
+        self.val = Transformer(in_channel, 1, k=3, dropout=0.1, depth=3, residual=True, sn=True, sln=sln,
                                         w_dim=w_dim)
 
     def forward(self, x, num, i, enc, w):

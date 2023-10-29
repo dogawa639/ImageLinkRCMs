@@ -22,7 +22,8 @@ __all__ = [
     "DeepLabV3_ResNet50_Weights", 
     "deeplabv3_mobilenet_v3_large", 
     "MobileNet_V3_Large_Weights",
-    "DeepLabV3_MobileNet_V3_Large_Weights"
+    "DeepLabV3_MobileNet_V3_Large_Weights",
+    "resnnet50"
 ]
 
 M = TypeVar("M", bound=nn.Module)

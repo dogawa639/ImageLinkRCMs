@@ -45,7 +45,7 @@ class SLN(nn.Module):
         assert(input_size == parameter_size or parameter_size == 1)
         self.input_size = input_size
         self.parameter_size = parameter_size
-        self.ln = nn.LayerNorm(input_size)
+        self.ln = nn.LayerNorm(parameter_size)
         self.gamma = FF(input_size, parameter_size, input_size, bias=False)
         self.beta = FF(input_size, parameter_size, input_size, bias=False)
 
@@ -54,3 +54,4 @@ class SLN(nn.Module):
         beta = self.beta(w)
         ln = self.ln(hidden)
         return gamma * ln + beta
+

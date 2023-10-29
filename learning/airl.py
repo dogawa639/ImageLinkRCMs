@@ -248,11 +248,12 @@ class AIRL:
         # w: (bs, w_dim)
         # index: (bs, 9)
         bs = batch[0].shape[0]
-        image_feature = tensor(np.zeros((bs, self.link_num, self.emb_dim), dtype=np.float32), device=self.device)
+        image_feature_pre = tensor(np.zeros((bs, self.link_num, self.emb_dim), dtype=np.float32), device=self.device)
         for patches in self.image_data.load_link_patches():
             # patches [image_data]
             for i, patch in enumerate(patches):
-                image_feature[:, i, :] = image_feature[:, i, :] + self.encoder(patch, w) / len(self.image_data)  # requires_grad=True
+                image_feature_pre[:, i, :] = image_feature_pre[:, i, :] + self.encoder(patch, w) / len(self.image_data)  # requires_grad=True
+        image_feature = self.encoder.encode(image_feature_pre)  # (bs, link_num, emb_dim)
 
         # inputs: (bs, c, 3, 3) or (bs, link_num, feature_num)
         if self.use_index:
