@@ -93,7 +93,7 @@ class CNNGen(nn.Module):
 
 
 class GNNGen(nn.Module):
-    def __init__(self, in_channel, output_channel, device="cpu", sln=False, w_dim=None):
+    def __init__(self, in_channel, output_channel, device="cpu", sln=True, w_dim=None):
         super().__init__()
         if sln and w_dim is None:
             raise Exception("w_dim should be specified when sln is True")
@@ -109,7 +109,7 @@ class GNNGen(nn.Module):
         self.to(self.device)
 
     def forward(self, x, i, w=None):
-        # x: (link_num, in_channel)
+        # x: (bs, link_num, in_channel)
         # enc: (trip_num, enc_dim)
         # output: (trip_num, link_num, link_num) or (trip_num, oc, link_num, link_num)
         if i == None:
@@ -137,6 +137,7 @@ if __name__ == "__main__":
     link_path = '/Users/dogawa/Desktop/bus/estimation/data/link.csv'
     link_prop_path = '/Users/dogawa/Desktop/bus/estimation/data/link_attr_min.csv'
     model_dir = "/Users/dogawa/PycharmProjects/GANs/trained_models"
+    input_channel = 5
     output_channel = 2
     w_dim = 5
     nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
@@ -147,6 +148,14 @@ if __name__ == "__main__":
     gen = CNNGen(nw_data, output_channel, w_dim=w_dim).to(device)
 
     inputs = torch.randn(10, f+c, 3, 3).to(device)
+    w = torch.randn(10, w_dim).to("mps")
+    out = gen(inputs, 0, w=w)
+    out2 = gen(inputs, 1, w=w)
+    print(out.shape, out2.shape)
+
+    gen = GNNGen(input_channel, output_channel, w_dim=w_dim).to(device)
+
+    inputs = torch.randn(10, len(nw_data.lids), input_channel).to(device)
     w = torch.randn(10, w_dim).to("mps")
     out = gen(inputs, 0, w=w)
     out2 = gen(inputs, 1, w=w)

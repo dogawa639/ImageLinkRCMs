@@ -45,6 +45,7 @@ class AttentionBlock(nn.Module):
             self.attn_fc = [spectral_norm(nn.Linear(2 * self.in_channel, 1, bias=False)) for _ in range(self.k)]
 
     def forward(self, x, enc=None, w=None):
+        # enc: positional encoding
         bs = x.shape[0]
         n = x.shape[1]
         if enc is not None:
