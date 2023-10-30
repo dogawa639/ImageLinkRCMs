@@ -187,7 +187,7 @@ class NetworkBase:
         for i, lid in enumerate(link_prop["LinkID"].values):
             if lid in self.edges:
                 tmp_prop = dict()
-                for prop in enumerate(link_props):
+                for prop in link_props:
                     tmp_prop[prop] = link_prop[prop].values[i]
                 self.edges[lid].set_prop(tmp_prop)
 

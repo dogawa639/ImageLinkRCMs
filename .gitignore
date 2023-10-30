@@ -2,6 +2,7 @@
 *.csv
 *.pth
 *.npy
+/trained_models
 
 # configs
 *.ini

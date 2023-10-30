@@ -42,7 +42,6 @@ class SLN(nn.Module):
     def __init__(self, input_size, parameter_size):
         # input_size: w, parameter_size: hidden
         super().__init__()
-        assert(input_size == parameter_size or parameter_size == 1)
         self.input_size = input_size
         self.parameter_size = parameter_size
         self.ln = nn.LayerNorm(parameter_size)
@@ -50,6 +49,8 @@ class SLN(nn.Module):
         self.beta = FF(input_size, parameter_size, input_size, bias=False)
 
     def forward(self, hidden, w):
+        # hidden: (*, parameter_size)
+        # w: (*, input_size)
         gamma = self.gamma(w)
         beta = self.beta(w)
         ln = self.ln(hidden)

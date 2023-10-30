@@ -3,7 +3,7 @@ from torch import nn, tensor
 from torch.nn import functional as F
 from torch.nn.utils import spectral_norm
 
-from .general import Softplus, SLN
+from general import Softplus, SLN
 
 __all__ = ["AttentionBlock", "Transformer"]
 
@@ -81,7 +81,7 @@ class AttentionBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, in_channel, out_channel, enc_dim=None, k=1, dropout=0.0, depth=1, residual=True, sln=False, w_dim=None):
+    def __init__(self, in_channel, out_channel, enc_dim=None, k=1, dropout=0.0, depth=1, residual=True, sn=False, sln=False, w_dim=None):
         super().__init__()
         self.in_channel = in_channel
         self.out_channel = out_channel
@@ -90,10 +90,11 @@ class Transformer(nn.Module):
         self.dropout = dropout
         self.depth = depth
         self.residual = residual
+        self.sn = sn
         self.sln = sln
         self.w_dim = w_dim
 
-        kwargs = {"enc_dim": enc_dim, "k": k, "dropout": dropout, "residual": residual, "sln": sln, "w_dim": w_dim}
+        kwargs = {"enc_dim": enc_dim, "k": k, "dropout": dropout, "residual": residual, "": sn, "sln": sln, "w_dim": w_dim}
         self.at_blocks = nn.ModuleList([AttentionBlock(in_channel, out_channel, **kwargs)] + [AttentionBlock(out_channel, out_channel, **kwargs) for _ in range(depth - 1)])
 
     def forward(self, x, enc, w=None):

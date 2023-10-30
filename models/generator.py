@@ -8,22 +8,22 @@ from general import FF, SLN
 import numpy as np
 
 class CNNGen(nn.Module):
-    def __init__(self, nw_data, output_channel, max_num=40, sln=True, w_dim=10, device="cpu"):
+    def __init__(self, nw_data, output_channel, max_num=40, sln=True, w_dim=10):
         super().__init__()
 
         self.nw_data = nw_data
         self.output_channel = output_channel
         self.max_num = max_num
-        self.device = device
 
-        self.input_feature = self.nw_data.link_feature_num + self.nw_data.context_feature_num
+        self.input_feature = self.nw_data.feature_num + self.nw_data.context_feature_num
         self.cnn = CNN2L(self.input_feature, self.output_channel, sln=sln, w_dim=w_dim)  # forward: (B, C, 3, 3)->(B, C', 3, 3)
 
-    def forward(self, input, i):
+
+    def forward(self, input, i, w=None):
         # input: (sum(links), input_feature, 3, 3)
         # output: (sum(links), 3, 3)
         # model output: (sum(links), oc, 3, 3)
-        return self.cnn(input)[:, i, :, :]
+        return self.cnn(input, w=w)[:, i, :, :]
 
     def generate(self, num):
         # num: int or list(self.output_channel elements)
@@ -106,6 +106,8 @@ class GNNGen(nn.Module):
 
         self.transformer = Transformer(in_channel, output_channel, k=3, dropout=0.1, depth=3, residual=True, sln=sln, w_dim=w_dim)
 
+        self.to(self.device)
+
     def forward(self, x, i, w=None):
         # x: (link_num, in_channel)
         # enc: (trip_num, enc_dim)
@@ -126,4 +128,27 @@ class GNNGen(nn.Module):
     def load(self, model_dir):
         self.load_state_dict(torch.load(model_dir + "/gnngen.pth"))
 
+
+# for test
+if __name__ == "__main__":
+    from preprocessing.network_processing import *
+    device = "mps"
+    node_path = '/Users/dogawa/Desktop/bus/estimation/data/node.csv'
+    link_path = '/Users/dogawa/Desktop/bus/estimation/data/link.csv'
+    link_prop_path = '/Users/dogawa/Desktop/bus/estimation/data/link_attr_min.csv'
+    model_dir = "/Users/dogawa/PycharmProjects/GANs/trained_models"
+    output_channel = 2
+    w_dim = 5
+    nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
+    f = nw_data.feature_num
+    c = nw_data.context_feature_num
+    print(f"f: {f}, c: {c}")
+
+    gen = CNNGen(nw_data, output_channel, w_dim=w_dim).to(device)
+
+    inputs = torch.randn(10, f+c, 3, 3).to(device)
+    w = torch.randn(10, w_dim).to("mps")
+    out = gen(inputs, 0, w=w)
+    out2 = gen(inputs, 1, w=w)
+    print(out.shape, out2.shape)
 

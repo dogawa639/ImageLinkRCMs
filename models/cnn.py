@@ -9,7 +9,7 @@ __all__ = ["CNN2L", "CNN2LDepth", "CNN2LPositive", "CNN2LNegative"]
 
 
 class CNN2L(nn.Module):
-    def __init__(self, input_channel, output_channel, residual=True, sn=False, sln=False, w_dim=None):
+    def __init__(self, input_channel, output_channel, residual=True, sn=False, sln=False, w_dim=None, device="cpu"):
         # forward: (B, C, 3, 3)->(B, C', 3, 3)
         # sn: spectral normalization, sln: self-modulated layer normalization
         super().__init__()
@@ -22,6 +22,7 @@ class CNN2L(nn.Module):
         self.sn = sn
         self.sln = sln
         self.w_dim = w_dim
+        self.device = device
 
         # convolution
         if not sn:
@@ -37,11 +38,11 @@ class CNN2L(nn.Module):
         self.fc2 = nn.Conv2d(self.input_channel + self.input_channel * residual, self.output_channel, 1, padding=0, bias=False)  #(bs, in_channel*2, 3, 3)->(bs, oc, 3, 3)
 
         if not sln:
-            self.layer_norm1 = nn.LayerNorm(self.in_channel)
-            self.layer_norm2 = nn.LayerNorm(self.in_channel)
+            self.layer_norm1 = nn.LayerNorm(self.input_channel)
+            self.layer_norm2 = nn.LayerNorm(self.input_channel*16)
         else:
-            self.layer_norm1 = SLN(self.w_dim, self.in_channel)
-            self.layer_norm2 = SLN(self.w_dim, self.in_channel)
+            self.layer_norm1 = SLN(self.w_dim, self.input_channel)
+            self.layer_norm2 = SLN(self.w_dim, self.input_channel*16)
 
         self.sequence1 = nn.Sequential(
             self.cov1,
@@ -59,23 +60,30 @@ class CNN2L(nn.Module):
             self.fc2
         )
 
+        self.to(self.device)
+
     def forward(self, x, w=None):
         if self.sln and w is None:
             raise Exception("w should be specified when sln is True")
+        x_reshape = x.reshape(-1, self.input_channel, 9).transpose(1, 2)  # (bs, 9, c)
         if self.sln:
-            x_norm = self.layer_norm1(x, w)
+            # w: (bs, w_dim)
+            w_reshape = w.unsqueeze(1).repeat(1, 9, 1)
+        if self.sln:
+            x_norm = self.layer_norm1(x_reshape, w_reshape).transpose(1, 2)
         else:
-            x_norm = self.layer_norm1(x)
-        y = self.sequence1(x_norm)
+            x_norm = self.layer_norm1(x).transpose(1, 2)
+        y = self.sequence1(x_norm.reshape(-1, self.input_channel, 3, 3))
 
+        y_reshape = y.reshape(-1, self.input_channel*16, 9).transpose(1, 2)  # (bs, 9, c)
         if self.sln:
-            y_norm = self.layer_norm2(y, w)
+            y_norm = self.layer_norm2(y_reshape, w_reshape)
         else:
-            y_norm = self.layer_norm2(y)
-        y = self.sequence2(y_norm)
+            y_norm = self.layer_norm2(y_reshape)
+        z = self.sequence2(y_norm.transpose(1, 2).reshape(-1, self.input_channel*16, 3, 3))
 
         if self.residual:
-            return self.sequence3(torch.cat([y, x], dim=1))
+            return self.sequence3(torch.cat([z, x], dim=1))
         else:
             return self.sequence3(y)
 
