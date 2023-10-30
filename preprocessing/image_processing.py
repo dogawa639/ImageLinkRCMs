@@ -183,4 +183,6 @@ class ImageData:
         return (image * mask)[np.ix_(list(range(image.shape[0])), x_idxs, y_idxs)]
     
 
-
+# test
+if __name__ == "__main__":
+    
