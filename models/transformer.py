@@ -36,15 +36,16 @@ class AttentionBlock(nn.Module):
         if self.enc_dim is not None:
             self.ff_enc = nn.Linear(self.enc_dim, self.in_channel, bias=True)
         if not sn:
-            self.ff0 = [nn.Linear(self.in_channel, self.in_channel, bias=False) for _ in range(self.k)]
-            self.ff1 = [nn.Linear(self.in_channel, self.out_channel, bias=False) for _ in range(self.k)]
-            self.attn_fc = [nn.Linear(2 * self.in_channel, 1, bias=False) for _ in range(self.k)]
+            self.ff0 = nn.ModuleList([nn.Linear(self.in_channel, self.in_channel, bias=False) for _ in range(self.k)])
+            self.ff1 = nn.ModuleList([nn.Linear(self.in_channel, self.out_channel, bias=False) for _ in range(self.k)])
+            self.attn_fc = nn.ModuleList([nn.Linear(2 * self.in_channel, 1, bias=False) for _ in range(self.k)])
         else:
-            self.ff0 = [spectral_norm(nn.Linear(self.in_channel, self.in_channel, bias=False)) for _ in range(self.k)]
-            self.ff1 = [spectral_norm(nn.Linear(self.in_channel, self.out_channel, bias=False)) for _ in range(self.k)]
-            self.attn_fc = [spectral_norm(nn.Linear(2 * self.in_channel, 1, bias=False)) for _ in range(self.k)]
+            self.ff0 = nn.ModuleList([spectral_norm(nn.Linear(self.in_channel, self.in_channel, bias=False)) for _ in range(self.k)])
+            self.ff1 = nn.ModuleList([spectral_norm(nn.Linear(self.in_channel, self.out_channel, bias=False)) for _ in range(self.k)])
+            self.attn_fc = nn.ModuleList([spectral_norm(nn.Linear(2 * self.in_channel, 1, bias=False)) for _ in range(self.k)])
 
     def forward(self, x, enc=None, w=None):
+        # x: (link_num, in_channel)
         # enc: positional encoding
         bs = x.shape[0]
         n = x.shape[1]
@@ -82,6 +83,8 @@ class AttentionBlock(nn.Module):
 
 
 class Transformer(nn.Module):
+    # input: (link_num, input_channel)
+    # output: (bs, link_num, output_channel)
     def __init__(self, in_channel, out_channel, enc_dim=None, k=1, dropout=0.0, depth=1, residual=True, sn=False, sln=False, w_dim=None):
         super().__init__()
         self.in_channel = in_channel
@@ -95,7 +98,7 @@ class Transformer(nn.Module):
         self.sln = sln
         self.w_dim = w_dim
 
-        kwargs = {"enc_dim": enc_dim, "k": k, "dropout": dropout, "residual": residual, "": sn, "sln": sln, "w_dim": w_dim}
+        kwargs = {"enc_dim": enc_dim, "k": k, "dropout": dropout, "residual": residual, "sn": sn, "sln": sln, "w_dim": w_dim}
         self.at_blocks = nn.ModuleList([AttentionBlock(in_channel, out_channel, **kwargs)] + [AttentionBlock(out_channel, out_channel, **kwargs) for _ in range(depth - 1)])
 
     def forward(self, x, enc, w=None):

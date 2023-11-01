@@ -52,6 +52,7 @@ class Edge:
         self.end = end
         self.length = self.get_length(start, end)
         self.angle = self.get_angle(start, end)
+        self.undir_id = -1  # undirected link id
 
         self.prop = {"length": self.length, "angle": self.angle}
 
@@ -142,6 +143,7 @@ class NetworkBase:
         self.edges, self.lids = self._set_edges()  # dict key: id, value: Edge
         self._set_downstream()  # add downstream edges to each node
         self._set_edge_nodes()  # (start, end): linkId
+        self._set_undir_id()  # set undir_id for all edges
 
         self._set_graphs()  # adj cost matrix [start,end], adj cost matrix 線グラフ
         self._set_shortest_path_all()
@@ -273,6 +275,21 @@ class NetworkBase:
         val = self.link[["id", "start", "end"]].values
         self.edge_nodes = {(v[1], v[2]): v[0] for v in val}
 
+    def _set_undir_id(self):
+        self.undir_edges = dict()  # key: undir_id, value: [lid]
+        undir_id = 1
+        for k, v in self.edge_nodes.items():
+            edge = self.edges[v]
+            if (k[1], k[0]) in self.edge_nodes:
+                inv_edge = self.edges[self.edge_nodes[(k[1], k[0])]]
+                if inv_edge.undir_id > 0:  # 逆方向リンクがすでに追加されていた場合
+                    edge.undir_id = inv_edge.undir_id
+                    self.undir_edges[edge.undir_id].append(v)
+                    continue
+            edge.undir_id = undir_id
+            self.undir_edges[undir_id] = [v]
+            undir_id += 1
+
     def _set_graphs(self):
         self.graph = np.zeros((len(self.node), len(self.node)), dtype=np.float32)
         nid2idx = {nid: i for i, nid in enumerate(self.nids)}
@@ -316,6 +333,9 @@ class NetworkBase:
     def feature_num(self):
         return len(self.link_props)
 
+    @property
+    def link_num(self):
+        return len(self.lids)
 
 class NetworkCNN(NetworkBase):
     def __init__(self, *args, **kwargs):

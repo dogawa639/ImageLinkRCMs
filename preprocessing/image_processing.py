@@ -24,7 +24,7 @@ class ImageData:
     def set_voronoi(self, network):
         # network: Network in network_processing.py
         self.network = network
-        center_points = [v.cetner for v in network.edges.values()]
+        center_points = [network.edges[v[0]].center for v in network.undir_edges.values()]
         nodes = [(v.x, v.y) for v in network.nodes.values()]
 
         # cv2 subdiv for each image
@@ -34,7 +34,7 @@ class ImageData:
             center_idxs_x = [int((x - data["x_coord"][0]) / (data["x_coord"][1] - data["x_coord"][0]) * image.shape[1]) for x,_ in center_points]
             center_idxs_y = [int((y - data["y_coord"][0]) / (data["y_coord"][1] - data["y_coord"][0]) * image.shape[0]) for _,y in center_points]
 
-            subdiv = cv2.subdiv2D((0, 0, image.shape[1], image.shape[0]))
+            subdiv = cv2.Subdiv2D((0, 0, image.shape[1], image.shape[0]))
             for i in range(len(center_points)):
                 if center_idxs_x[i] < 0 or center_idxs_x[i] >= image.shape[1] or center_idxs_y[i] < 0 or center_idxs_y[i] >= image.shape[0]:
                     continue
@@ -43,9 +43,10 @@ class ImageData:
 
             # voronoi image
             imgv = np.zeros(image.shape, dtype=np.uint8)
-            lids = list(network.edges.keys())
+            undir_ids = list(network.undir_edges.keys())
             for i, p in enumerate(f.astype(int) for f in voronoi):
-                color = ImageData.get_rbg_from_number(lids[i])
+                color = ImageData.get_rbg_from_number(undir_ids[i])  # rgb
+                color = (color[2], color[1], color[0])  # bgr
                 cv2.fillConvexPoly(imgv, p, color)
             voronoi_path = data["path"].replace(".png", "_voronoi.png")
             data["voronoi_path"] = voronoi_path
@@ -55,7 +56,7 @@ class ImageData:
             node_idxs_x = [int((x - data["x_coord"][0]) / (data["x_coord"][1] - data["x_coord"][0]) * image.shape[1]) for x,_ in nodes]
             node_idxs_y = [int((y - data["y_coord"][0]) / (data["y_coord"][1] - data["y_coord"][0]) * image.shape[0]) for _,y in nodes]
 
-            node_points = [[node_idxs_x[i], node_idxs_y[i]] for i in range(len(nodes)) if node_idxs_x[i] >= 0 and node_idxs_x[i] < image.shape[1] and node_idxs_y[i] >= 0 and node_idxs_y[i] < image.shape[0]]
+            node_points = [[node_idxs_x[i], image.shape[0] - node_idxs_y[i]] for i in range(len(nodes)) if node_idxs_x[i] >= 0 and node_idxs_x[i] < image.shape[1] and node_idxs_y[i] >= 0 and node_idxs_y[i] < image.shape[0]]
 
             convex_hull = cv2.convexHull(np.array(node_points))
             convex_hull_mask = np.zeros(image.shape, dtype=np.uint8)
@@ -77,7 +78,7 @@ class ImageData:
             yield image
             data_idx += 1
         
-    def load_link_patches(self):
+    def load_link_patches(self, patch_size=256):
         # 直前に呼び出したset_voronoiに対応する．
         # for i in range(len(image_data)):
         #    patches = image_data.load_link_patches()
@@ -91,7 +92,7 @@ class ImageData:
                 break
 
             voronoi = np.array(Image.open(data["voronoi_path"]))  # RGB (H, W, 3)
-            voronoi_lids = ImageData.get_number_from_rgb(voronoi[:,:,0], voronoi[:,:,1], voronoi[:,:,2]).astype(int)  # (H, W)
+            voronoi_lids = ImageData.get_number_from_rgb(voronoi[:,:,0].astype(int), voronoi[:,:,1].astype(int), voronoi[:,:,2].astype(int))  # (H, W)
             del voronoi
 
             convex_hull_mask = np.array(Image.open(data["convex_hull_path"]))  # gray (H, W)
@@ -100,13 +101,25 @@ class ImageData:
 
             # link patches
             patches = []
-            image = np.array(Image.open(data["path"])).transpose(0, 2)  # RGB (3, H, W)
-            lids = list(self.network.edges.keys())
-            for lid in lids:
-                target_mask = (voronoi_lids == lid)
-                x_idxs = np.where(target_mask.sum(axis=0) > 0)
-                y_idxs = np.where(target_mask.sum(axis=1) > 0)
-                patches.append(image[np.ix_(list(range(image.shape[0])), x_idxs, y_idxs)])
+            image = np.array(Image.open(data["path"]))
+            image = image.transpose(2, 0, 1)  # RGB (3, H, W)
+            for edge in self.network.edges.values():
+                patch = np.zeros((3, patch_size, patch_size), dtype=np.uint8)
+                target_mask = (voronoi_lids == edge.undir_id)
+                x_idxs = np.where(target_mask.sum(axis=0) > 0)[0]
+                y_idxs = np.where(target_mask.sum(axis=1) > 0)[0]
+                print(len(x_idxs), len(y_idxs))
+                if len(x_idxs) > 0 and len(y_idxs) > 0:
+                    cropped_image = image[np.ix_(list(range(image.shape[0])), y_idxs, x_idxs)]
+                    if cropped_image.shape[1] > patch_size:
+                        pad = (cropped_image.shape[1] - patch_size) // 2
+                        cropped_image = cropped_image[:, pad:pad+patch_size, :]
+                    if cropped_image.shape[2] > patch_size:
+                        pad = (cropped_image.shape[2] - patch_size) // 2
+                        cropped_image = cropped_image[:, :, pad:pad+patch_size]
+                    pad = (patch_size - np.array(cropped_image.shape)[1:]) // 2
+                    patch[:, pad[0]:pad[0]+cropped_image.shape[1], pad[1]:pad[1]+cropped_image.shape[2]] = cropped_image
+                patches.append(patch)
             del image
 
             yield patches
@@ -186,17 +199,23 @@ class ImageData:
 # test
 if __name__ == "__main__":
     from preprocessing.network_processing import *
+    import matplotlib.pyplot as plt
     device = "mps"
     node_path = '/Users/dogawa/Desktop/bus/estimation/data/node.csv'
     link_path = '/Users/dogawa/Desktop/bus/estimation/data/link.csv'
     link_prop_path = '/Users/dogawa/Desktop/bus/estimation/data/link_attr_min.csv'
 
-    image_data = ImageData("../data/image_data.json")
+    image_data = ImageData("../data/test.json")
     nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
 
     image_data.set_voronoi(nw_data)
-    for patches in image_data.load_link_patches():
-        print(patches[0].shape)
+    for patches in image_data.load_link_patches(patch_size=256):
+        for patch in patches:
+            if np.sum(patch>0) > 0:
+                fig = plt.figure()
+                plt.imshow(patches[0].transpose(1, 2, 0))
+                plt.show()
+                break
         break
 
 

@@ -93,18 +93,17 @@ class CNNGen(nn.Module):
 
 
 class GNNGen(nn.Module):
-    def __init__(self, in_channel, output_channel, device="cpu", sln=True, w_dim=None):
+    def __init__(self, input_channel, output_channel, sln=True, w_dim=None):
         super().__init__()
         if sln and w_dim is None:
             raise Exception("w_dim should be specified when sln is True")
 
-        self.in_channel = in_channel
+        self.input_channel = input_channel
         self.output_channel = output_channel
-        self.device = device
         self.sln = sln
         self.w_dim = w_dim
 
-        self.transformer = Transformer(in_channel, output_channel, k=3, dropout=0.1, depth=3, residual=True, sln=sln, w_dim=w_dim)
+        self.transformer = Transformer(input_channel, output_channel, k=3, dropout=0.1, depth=3, residual=True, sln=sln, w_dim=w_dim)
 
         self.to(self.device)
 

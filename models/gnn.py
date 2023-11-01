@@ -22,9 +22,9 @@ class GATBlock(nn.Module):
         self.layer_norm2 = nn.LayerNorm(self.in_channel)
         self.dropout = nn.Dropout(p=dropout)
 
-        self.ff0 = [nn.Linear(self.in_channel, self.in_channel, bias=False) for _ in range(self.k)]
-        self.ff1 = [nn.Linear(self.in_channel, self.out_channel, bias=False) for _ in range(self.k)]
-        self.attn_fc = [nn.Linear(2 * self.in_channel, 1, bias=False) for _ in range(self.k)]
+        self.ff0 = nn.ModuleList([nn.Linear(self.in_channel, self.in_channel, bias=False) for _ in range(self.k)])
+        self.ff1 = nn.ModuleList([nn.Linear(self.in_channel, self.out_channel, bias=False) for _ in range(self.k)])
+        self.attn_fc = nn.ModuleList([nn.Linear(2 * self.in_channel, 1, bias=False) for _ in range(self.k)])
 
     def forward(self, x, adj):
         n = x.shape[0]
@@ -53,6 +53,7 @@ class GATBlock(nn.Module):
             else:
                 atten_agg = atten_agg + atten.clone().detach() / self.k
         return h_next, atten_agg
+
 
 
 class GAT(nn.Module):
@@ -96,9 +97,9 @@ class GTBlock(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
         self.ff_enc = nn.Linear(self.enc_dim, self.in_channel, bias=True)
-        self.ff0 = [nn.Linear(self.in_channel, self.in_channel, bias=False) for _ in range(self.k)]
-        self.ff1 = [nn.Linear(self.in_channel, self.out_channel, bias=False) for _ in range(self.k)]
-        self.attn_fc = [nn.Linear(2 * self.in_channel, 1, bias=False) for _ in range(self.k)]
+        self.ff0 = nn.ModuleList([nn.Linear(self.in_channel, self.in_channel, bias=False) for _ in range(self.k)])
+        self.ff1 = nn.ModuleList([nn.Linear(self.in_channel, self.out_channel, bias=False) for _ in range(self.k)])
+        self.attn_fc = nn.ModuleList([nn.Linear(2 * self.in_channel, 1, bias=False) for _ in range(self.k)])
 
     def forward(self, x, enc=None):
         n = x.shape[0]
@@ -155,4 +156,5 @@ class GT(nn.Module):
             else:
                 atten = torch.einsum("ij, jk -> ik", atten_agg, atten)
         return x, atten
+
     

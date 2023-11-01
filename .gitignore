@@ -10,3 +10,6 @@
 
 # system
 /.idea
+
+# test
+test.json

@@ -1,10 +1,10 @@
 import torch
 from torch import tensor, nn, optim
 import torch.nn.functional as F
-from deeplabv3 import resnet50, ResNet50_Weights
-from transformer import Transformer
-from gnn import GAT
-from general import FF, SLN
+from models.deeplabv3 import resnet50, ResNet50_Weights
+from models.transformer import Transformer
+from models.gnn import GAT
+from models.general import FF, SLN
 
 import numpy as np
 
@@ -21,12 +21,11 @@ class CNNEnc(nn.Module):
         self.adj_mat = adj_mat  # tensor
         self.sln = sln
         self.w_dim = w_dim
-        self.mid_dim = int(patch_size[1]/32*patch_size[2]/32*2048)
+        self.mid_dim = 1000
 
         self.resnet50 = resnet50(weights=ResNet50_Weights.DEFAULT, replace_stride_with_dilation=[False, True, True])
-        self.flatten = nn.Flatten()
-        self.lin = [FF(self.mid_dim, emb_dim, bias=True) for _ in range(num_source)]
-        self.norm0 = nn.LayerNorm(emb_dim)
+        self.lin = nn.ModuleList([FF(self.mid_dim, emb_dim, self.mid_dim*2, bias=True) for _ in range(num_source)])
+        self.norm0 = nn.LayerNorm(patch_size)
         if sln:
             self.norm1 = SLN(w_dim, self.mid_dim)
             self.norm2 = SLN(w_dim, emb_dim)  # layer norm at the last output
@@ -36,9 +35,7 @@ class CNNEnc(nn.Module):
 
         self.seq = nn.Sequential(
             self.norm0,
-            self.resnet50,
-            self.flatten,
-            self.norm1
+            self.resnet50  # output: (bs, 1000)
         )
 
         # graph encoding
@@ -51,6 +48,10 @@ class CNNEnc(nn.Module):
         if self.sln and w is None:
             raise Exception("w should be specified when sln is True")
         x = self.seq(patch)
+        if self.sln:
+            x = self.norm1(x, w)
+        else:
+            x = self.norm1(x)
         x = self.lin[source_i](x)
         if self.sln:
             x = self.norm2(x, w)
@@ -64,3 +65,30 @@ class CNNEnc(nn.Module):
         for i in range(features.shape[0]):
             x[i, :, :], atten = self.gnn(features[i, :, :], self.adj_mat)
         return x
+
+
+# test
+if __name__ == "__main__":
+    patch_size = (3, 256, 256)
+    emb_dim = 10
+    num_source = 1
+    w_dim = 3
+    link_num = 10
+    device = "mps"
+    inputs = torch.randn(10, patch_size[0], patch_size[1], patch_size[2]).to(device)
+    adj_mat = torch.randint(low=0, high=2, size=(10, 10)).to(device)
+    w = torch.randn(10, w_dim).to(device)
+
+    cnn = CNNEnc(patch_size, emb_dim=emb_dim, adj_mat=adj_mat, num_source=num_source, w_dim=w_dim).to(device)
+
+    out = cnn(inputs, source_i=0, w=w)
+    print(out.shape)
+
+    features = torch.randn(10, link_num, emb_dim).to(device)
+    out_feature = cnn.encode(features)
+    print(out_feature.shape)
+
+
+
+
+

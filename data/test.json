@@ -1,7 +1,7 @@
 [
     {
         "name": "aviational_image", 
-        "path": "./data/png/matsuyama_all.png", 
+        "path": "/Users/dogawa/Desktop/bus/aviational/data/matsuyama_all.png",
         "z": 18, 
         "x": [227734, 227760], 
         "y": [104849, 104865], 

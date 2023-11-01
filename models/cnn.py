@@ -38,8 +38,8 @@ class CNN2L(nn.Module):
         self.fc2 = nn.Conv2d(self.input_channel + self.input_channel * residual, self.output_channel, 1, padding=0, bias=False)  #(bs, in_channel*2, 3, 3)->(bs, oc, 3, 3)
 
         if not sln:
-            self.layer_norm1 = nn.LayerNorm(self.input_channel)
-            self.layer_norm2 = nn.LayerNorm(self.input_channel*16)
+            self.layer_norm1 = nn.LayerNorm((self.input_channel, 3, 3))
+            self.layer_norm2 = nn.LayerNorm((self.input_channel*16, 3, 3))
         else:
             self.layer_norm1 = SLN(self.w_dim, self.input_channel)
             self.layer_norm2 = SLN(self.w_dim, self.input_channel*16)
@@ -102,9 +102,9 @@ class CNN2LDepth(nn.Module):
         self.w_dim = w_dim
 
         if not sln:
-            self.layer_norm = nn.LayerNorm(self.in_channel)
+            self.layer_norm = nn.LayerNorm((self.input_channel, 3, 3))
         else:
-            self.layer_norm = SLN(self.w_dim, self.in_channel)
+            self.layer_norm = SLN(self.w_dim, self.input_channel)
 
         if not sn:
             self.cov1 = nn.Conv2d(self.input_channel, self.input_channel*16, 1, padding=0, bias=False)
