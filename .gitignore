@@ -2,6 +2,7 @@
 *.csv
 *.pth
 *.npy
+*.png
 /trained_models
 
 # configs

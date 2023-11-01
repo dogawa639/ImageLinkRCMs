@@ -1,0 +1,10 @@
+[
+    {
+        "name": "aviational_image", 
+        "path": "./data/png/matsuyama_all.png", 
+        "z": 18, 
+        "x": [227734, 227760], 
+        "y": [104849, 104865], 
+        "utm_num": 4
+    }
+]

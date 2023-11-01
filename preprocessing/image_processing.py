@@ -185,4 +185,18 @@ class ImageData:
 
 # test
 if __name__ == "__main__":
-    
+    from preprocessing.network_processing import *
+    device = "mps"
+    node_path = '/Users/dogawa/Desktop/bus/estimation/data/node.csv'
+    link_path = '/Users/dogawa/Desktop/bus/estimation/data/link.csv'
+    link_prop_path = '/Users/dogawa/Desktop/bus/estimation/data/link_attr_min.csv'
+
+    image_data = ImageData("../data/image_data.json")
+    nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
+
+    image_data.set_voronoi(nw_data)
+    for patches in image_data.load_link_patches():
+        print(patches[0].shape)
+        break
+
+
