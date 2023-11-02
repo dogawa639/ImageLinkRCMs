@@ -147,7 +147,7 @@ if __name__ == "__main__":
     gen = CNNGen(nw_data, output_channel, w_dim=w_dim).to(device)
 
     inputs = torch.randn(10, f+c, 3, 3).to(device)
-    w = torch.randn(10, w_dim).to("mps")
+    w = torch.randn(10, w_dim).to(device)
     out = gen(inputs, 0, w=w)
     out2 = gen(inputs, 1, w=w)
     print(out.shape, out2.shape)
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     gen = GNNGen(input_channel, output_channel, w_dim=w_dim).to(device)
 
     inputs = torch.randn(10, len(nw_data.lids), input_channel).to(device)
-    w = torch.randn(10, w_dim).to("mps")
+    w = torch.randn(10, w_dim).to(device)
     out = gen(inputs, 0, w=w)
     out2 = gen(inputs, 1, w=w)
     print(out.shape, out2.shape)

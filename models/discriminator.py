@@ -50,8 +50,8 @@ class GNNDis(nn.Module):
         if self.sln:
             self.ff0 = FF(h_dim, w_dim, h_dim*2, bias=True)
         kargs = {"enc_dim": enc_dim, "k": 3, "dropout": 0.1, "depth": 3, "residual": True, "sn": True, "sln": sln, "w_dim": w_dim}
-        self.util = Transformer(self.feature_num, self.link_num*output_channel, **kargs)
-        self.ext = Transformer(self.feature_num, self.link_num*output_channel, **kargs)
+        self.util = nn.ModuleList([Transformer(self.feature_num, self.link_num, **kargs) for _ in range(output_channel)])
+        self.ext = nn.ModuleList([Transformer(self.feature_num, self.link_num, **kargs) for _ in range(output_channel)])
         self.val = Transformer(self.feature_num, output_channel, **kargs)
 
     def forward(self, x, num, i, enc=None, w=None):
@@ -63,8 +63,8 @@ class GNNDis(nn.Module):
         x_rep = x.expand(num, x.shape[0], x.shape[1])
 
         v_val = self.val(x_rep, enc, w)[:, :, [i]]
-        f_val = self.util(x_rep, enc, w) + self.ext(x_rep, enc, w) + self.gamma * v_val.transpose(1, 2) - v_val
-        return f_val[:, i*self.link_num:(i+1)*self.link_num, :, :]
+        f_val = self.util[i](x_rep, enc, w) + self.ext(x_rep, enc, w)[i] + self.gamma * v_val.transpose(1, 2) - v_val
+        return f_val
 
 # test
 if __name__ == "__main__":
