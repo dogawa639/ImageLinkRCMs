@@ -54,17 +54,27 @@ class GNNDis(nn.Module):
         self.ext = nn.ModuleList([Transformer(self.feature_num, self.link_num, **kargs) for _ in range(output_channel)])
         self.val = Transformer(self.feature_num, output_channel, **kargs)
 
-    def forward(self, x, num, i, enc=None, w=None):
+    def forward(self, x, bs, i, enc=None, w=None):
         # x: (link_num, in_channel)
         # enc: (trip_num, link_num, enc_dim) positional encoding
         # output: (trip_num, link_num, link_num)
+        if x.dim() != 2:
+            raise Exception("x should be 2 dim")
         if enc is not None:
-            num = enc.shape[0]
-        x_rep = x.expand(num, x.shape[0], x.shape[1])
+            if enc.dim() == 2:
+                bs = 1
+                enc = enc.unsqueeze(0)
+            elif enc.dim() == 3:
+                num = enc.shape[0]
+            else:
+                raise Exception("enc should be 2 or 3 dim")
+        x = x.unsqueeze(0)
+        x_rep = x.expand(bs, x.shape[1], x.shape[2])
 
-        v_val = self.val(x_rep, enc, w)[:, :, [i]]
-        f_val = self.util[i](x_rep, enc, w) + self.ext(x_rep, enc, w)[i] + self.gamma * v_val.transpose(1, 2) - v_val
+        v_val = self.val(x_rep, enc, w)[0][:, :, [i]]
+        f_val = self.util[i](x_rep, enc, w)[0] + self.ext[i](x_rep, enc, w)[0] + self.gamma * v_val.transpose(1, 2) - v_val
         return f_val
+
 
 # test
 if __name__ == "__main__":
@@ -75,6 +85,7 @@ if __name__ == "__main__":
     link_path = '/Users/dogawa/Desktop/bus/estimation/data/link.csv'
     link_prop_path = '/Users/dogawa/Desktop/bus/estimation/data/link_attr_min.csv'
     model_dir = "/Users/dogawa/PycharmProjects/GANs/trained_models"
+    bs = 3
     input_channel = 5
     output_channel = 2
     w_dim = 5
@@ -85,16 +96,16 @@ if __name__ == "__main__":
 
     dis = CNNDis(nw_data, output_channel).to(device)
 
-    inputs = torch.randn(10, f+c, 3, 3).to(device)
+    inputs = torch.randn(bs, f+c, 3, 3).to(device)
     out = dis(inputs, 0)
     out2 = dis(inputs, 1)
     print(out.shape, out2.shape)
 
     dis = GNNDis(nw_data, output_channel, enc_dim, sln=True, w_dim=w_dim).to(device)
-    inputs = torch.randn(10, nw_data.feature_num).to(device)
-    w = torch.randn(10, w_dim).to(device)
-    enc = torch.randn(10, enc_dim).to(device)
-    out = dis(inputs, 10, 0, enc, w=w)
+    inputs = torch.randn(nw_data.link_num, nw_data.feature_num).to(device)
+    w = torch.randn(bs, w_dim).to(device)
+    enc = torch.randn(bs, nw_data.link_num, enc_dim).to(device)
+    out = dis(inputs, bs, 0, enc, w=w)
     print(out.shape)
 
 

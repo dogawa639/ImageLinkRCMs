@@ -45,25 +45,32 @@ class AttentionBlock(nn.Module):
             self.attn_fc = nn.ModuleList([spectral_norm(nn.Linear(2 * self.in_channel, 1, bias=False)) for _ in range(self.k)])
 
     def forward(self, x, enc=None, w=None):
-        # x: (link_num, in_channel)
-        # enc: positional encoding
+        # x: (bs, link_num, in_channel)
+        # enc: (bs, link_num, enc_dim) positional encoding
+        # w: (bs, w_dim)
+        if enc is not None and x.shape[0] != enc.shape[0]:
+            raise Exception("x and enc should have the same batch size")
+        if w is not None and x.shape[0] != w.shape[0]:
+            raise Exception("x and w should have the same batch size")
         bs = x.shape[0]
         n = x.shape[1]
         if enc is not None:
-            x = x + self.ff_enc(enc)  # (node_num, in_channel)
+            x = x + self.ff_enc(enc)  # (bs, link_num, in_channel)
         if self.sln:
+            w = w.unsqueeze(1).expand(bs, n, -1)
             x_norm = self.layer_norm1(x, w)
         else:
             x_norm = self.layer_norm1(x)
-        h_next = torch.zeros((n, self.out_channel), device=x.device)
+        h_next = torch.zeros((bs, n, self.out_channel), device=x.device)
         atten_agg = None
         for i in range(self.k):
-            h = self.ff0[i](x_norm)  # (node_num, in_channel)
+            h = self.ff0[i](x_norm)  # (bs, node_num, in_channel)
+            h_expand = h.unsqueeze(2).expand(bs, n, n, self.in_channel)  # (bs, node_num, 1, in_channel) -> (bs, node_num, node_num, in_channel)
 
-            h_cross = torch.cat((h.expand(bs, n, n, self.in_channel).transpose(0, 1), h.expand(bs, n, n, self.in_channel)), 3)  # (node_num, node_num, 2*in_channel) 行ベクタ | 列ベクタ
+            h_cross = torch.cat((h_expand, h_expand.transpose(1, 2)), 3)  # (bs, node_num, node_num, 2*in_channel) 行ベクタ | 列ベクタ
             e = F.leaky_relu(self.attn_fc[i](h_cross).squeeze(3))
 
-            atten = F.softmax(e, dim=2) # (node_num, node_num)
+            atten = F.softmax(e, dim=2)  # (bs, node_num, node_num)
             atten = self.dropout(atten)
 
             attentioned = torch.matmul(atten, h)
@@ -74,7 +81,7 @@ class AttentionBlock(nn.Module):
             else:
                 attentioned = self.layer_norm2(attentioned)
 
-            h_next = h_next + F.elu(self.ff1[i](attentioned)) / self.k  # (node_num, out_channel)
+            h_next = h_next + F.elu(self.ff1[i](attentioned)) / self.k  # (bs, node_num, out_channel)
             if atten_agg is None:
                 atten_agg = atten.clone().detach() / self.k
             else:
@@ -83,7 +90,7 @@ class AttentionBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    # input: (link_num, input_channel)
+    # input: (bs, link_num, input_channel)
     # output: (bs, link_num, output_channel)
     def __init__(self, in_channel, out_channel, enc_dim=None, k=1, dropout=0.0, depth=1, residual=True, sn=False, sln=False, w_dim=None):
         super().__init__()
@@ -102,12 +109,17 @@ class Transformer(nn.Module):
         self.at_blocks = nn.ModuleList([AttentionBlock(in_channel, out_channel, **kwargs)] + [AttentionBlock(out_channel, out_channel, **kwargs) for _ in range(depth - 1)])
 
     def forward(self, x, enc, w=None):
+        # x: (bs, link_num, input_channel)
+        # enc: None or (bs, link_num, enc_dim)
+        # w: None or (bs, w_dim)
+        if x.dim() != 3:
+            raise Exception("x should be 3 dim")
         atten = None
         for i, at_block in enumerate(self.at_blocks):
             if i == 0:
                 x, atten_agg = at_block(x, enc, w)
             else:
-                x, atten_agg = at_block(x, w)
+                x, atten_agg = at_block(x, w=w)
             if atten is None:
                 atten = atten_agg
             else:
