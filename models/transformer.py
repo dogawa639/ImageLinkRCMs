@@ -56,7 +56,7 @@ class MultiHeadAttention(nn.Module):
 
             logits = self.atten_mechanism(in_q, in_k, i)  # (*, input_channel, source_channel)
             if mask is not None:
-                if mask.dim() == atten.dim():
+                if mask.dim() == logits.dim():
                     logits = logits * mask
                 else:
                     logits = logits * mask.unsqueeze(-2)
@@ -82,8 +82,8 @@ class MultiHeadAttention(nn.Module):
         if self.atten_fn == "matmul":
             logits = torch.matmul(in_q, in_k.transpose(-2, -1)) / (in_k.shape[-2] ** 0.5)
         elif self.atten_fn == "dense":
-            f1 = self.dense_atten[head](in_q).unsqueeze(-2)  # (*, input_channel, 1, 1)
-            f2 = self.dense_atten[head](in_k).unsqueeze(-3)  # (*, 1, source_channel, 1)
+            f1 = self.dense_atten[head](in_q) # (*, input_channel, 1)
+            f2 = self.dense_atten[head](in_k).squeeze(-1).unsqueeze(-2)  # (*, 1, source_channel)
             logits = f1 + f2
         return logits
 
@@ -194,8 +194,9 @@ class TransformerEncoder(nn.Module):
             self.ff_enc = FF(enc_dim, emb_dim, enc_dim*2, bias=False)
 
     def forward(self, x, enc, mask=None, w=None):
-        # x: (bs, input_channel, emb_dim)
-        # enc: None or (bs, input_channel, enc_dim)
+        # x: (bs, source_channel, emb_dim)
+        # enc: None or (bs, source_channel, enc_dim)
+        # mask: None or (bs, source_channel) or (bs, source_channel, source_channel)
         # w: None or (bs, w_dim) or (w_dim)
         if x.dim() != 3:
             raise Exception("x should be 3 dim")
@@ -231,7 +232,8 @@ class TransformerDecoder(nn.Module):
             "in_emb_dim": in_emb_dim, 
             "num_head": num_head, 
             "dropout": dropout, 
-            "sn": sn
+            "sn": sn,
+            "output_atten": True
             }
         self.self_attentions = nn.ModuleList([MultiHeadSelfAttention(emb_dim, **kwargs) for _ in range(depth)])
         if not sln:
@@ -255,10 +257,12 @@ class TransformerDecoder(nn.Module):
         if enc_dim is not None:
             self.ff_enc = FF(enc_dim, emb_dim, enc_dim*2, bias=False)
 
-    def forward(self, x, enc, kv, mask=None, w=None):
+    def forward(self, x, enc, kv, mask_input=None, mask_source=None, w=None):
         # x: (bs, input_channel, emb_dim)
         # enc: None or (bs, input_channel, enc_dim)
         # kv: (bs, source_channel, enc_dim)
+        # mask_input: None or (bs, input_channel, input_channel)
+        # mask_source: None or (bs, source_channel)
         # w: None or (bs, w_dim) or (w_dim)
         if x.dim() != 3:
             raise Exception("x should be 3 dim")
@@ -271,19 +275,45 @@ class TransformerDecoder(nn.Module):
                 self.tf_blocks[i].set_w(w)
             if self.pre_norm:
                 x = self.norms[i](x)
-                h, _ = self.self_attentions[i](x, mask=mask)
+                h, _ = self.self_attentions[i](x, mask=mask_input)
                 x = x + h
-                x, atten = self.tf_blocks[i](x, kv, mask=mask)
+                x, atten = self.tf_blocks[i](x, kv, mask=mask_source)
                 attens.append(atten)
             else:
-                h, _ = self.self_attentions[i](x, mask=mask)
+                h, _ = self.self_attentions[i](x, mask=mask_input)
                 x = x + h
                 x = self.norms[i](x)
-                x, atten = self.tf_blocks[i](x, kv, mask=mask)
+                x, atten = self.tf_blocks[i](x, kv, mask=mask_source)
                 attens.append(atten)
-        return x, attens
+        if self.output_atten:
+            return x, attens
+        return x
 
 
+# test
+if __name__ == "__main__":
+    device = "mps"
+    bs = 3
+    emb_dim = 4
+    enc_dim = 5
+    w_dim = 6
+    seq_len_source = 10
+    seq_len_input = 5
 
-    
+    transformer_enc = TransformerEncoder(emb_dim, enc_dim=enc_dim, num_head=2, depth=3, dropout=0.1, pre_norm=True, sn=True, sln=True, w_dim=w_dim, output_atten=True).to(device)
+    x = torch.randn((bs, seq_len_source, emb_dim), device=device)
+    enc_sou = torch.randn((bs, seq_len_source, enc_dim), device=device)
+    enc_inp = torch.randn((bs, seq_len_input, enc_dim), device=device)
+    mask_sou = (torch.randn((bs, seq_len_source), device=device) > 0.0).to(torch.float32)
+    mask_inp = (torch.randn((bs, seq_len_input, seq_len_input), device=device) > 0.0).to(torch.float32)
+    w = torch.randn((bs, w_dim), device=device)
+    q = torch.randn((bs, seq_len_input, emb_dim), device=device)
+
+    kv, attens_sou = transformer_enc(x, enc_sou, mask=mask_sou, w=w)
+
+    transformer_dec = TransformerDecoder(emb_dim, enc_dim=enc_dim, num_head=2, depth=3, dropout=0.1, pre_norm=True, sn=True, sln=True, w_dim=w_dim, output_atten=True).to(device)
+    z, attens_inp = transformer_dec(q, enc_inp, kv, mask_input=mask_inp, mask_source=mask_sou, w=w)
+
+    print(kv.shape, z.shape)
+    print(attens_sou[0].shape, attens_inp[0].shape)
 

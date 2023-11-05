@@ -4,11 +4,15 @@ from torch.nn.utils import spectral_norm
 
 import numpy as np
 
-__all__ = ["Softplus", "log", "FF", "SLN"]
+__all__ = ["Softplus", "softplus", "log", "FF", "SLN"]
 
 
 def log(x):
     return torch.log(torch.clip(x, min=1e-6))
+
+
+def softplus(x):
+    return torch.max(tensor(0.0, device=x.device), x) + log(1.0 + torch.exp(-torch.abs(x)))
 
 
 class Softplus(nn.Module):

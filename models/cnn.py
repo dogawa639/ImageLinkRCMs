@@ -7,7 +7,7 @@ from torch.nn.utils import spectral_norm
 
 import itertools
 
-__all__ = ["CNN2L", "CNN2LDepth", "CNN2LPositive", "CNN2LNegative"]
+__all__ = ["CNN3x3", "CNN1x1"]
 
 
 class CNN3x3(nn.Module):
@@ -38,9 +38,9 @@ class CNN3x3(nn.Module):
         self.fc2 = nn.Conv2d(channels[-1]*2 + channels[0] * residual, channels[-1], 1, padding=0, bias=False)  #(bs, channels[-1]*2+channels[0], H, W)->(bs, channels[-1], H, W)
 
         if not sln:
-            self.layer_norms = nn.MoudleList([nn.LayerNorm((channels[i], *self.patch_size)) for i in range(len(channels))])
+            self.layer_norms = nn.ModuleList([nn.LayerNorm((channels[i], *self.patch_size)) for i in range(len(channels))])
         else:
-            self.layer_norms = nn.MoudleList([SLN(w_dim, (channels[i], *self.patch_size)) for i in range(len(channels))])
+            self.layer_norms = nn.ModuleList([SLN(w_dim, (channels[i], *self.patch_size)) for i in range(len(channels))])
 
         # layer_norm->conv->softplus->...
         self.sequence1 = nn.Sequential(*itertools.chain(*zip(self.layer_norms[:-1], self.covs, [Softplus()] * (len(channels)-1))))
@@ -86,12 +86,12 @@ class CNN1x1(nn.Module):
             self.covs = nn.ModuleList([spectral_norm(nn.Conv2d(channels[i], channels[i+1], 1, padding=0, bias=False)) for i in range(len(channels)-1)])  # (bs, channels[i], H, W)->(bs, channels[i+1], H, W)
 
         if not sln:
-            self.layer_norms = nn.MoudleList([nn.LayerNorm((channels[i], *self.patch_size)) for i in range(len(channels)-1)])
+            self.layer_norms = nn.ModuleList([nn.LayerNorm((channels[i], *self.patch_size)) for i in range(len(channels)-1)])
         else:
-            self.layer_norms = nn.MoudleList([SLN(w_dim, (channels[i], *self.patch_size)) for i in range(len(channels)-1)])
+            self.layer_norms = nn.ModuleList([SLN(w_dim, (channels[i], *self.patch_size)) for i in range(len(channels)-1)])
 
         # layer_norm->conv->softplus->...
-        self.sequence1 = nn.Sequential(*itertools.chain(*zip(self.layer_norms[:-1], self.covs[-1], [Softplus()] * (len(channels)-2))))
+        self.sequence1 = nn.Sequential(*itertools.chain(*zip(self.layer_norms[:-1], self.covs[:-1], [Softplus()] * (len(channels)-2))))
         self.sequence2 = nn.Sequential(self.layer_norms[-1], self.covs[-1])
 
     def forward(self, x, w=None):
@@ -105,5 +105,22 @@ class CNN1x1(nn.Module):
                 self.layer_norms[i].set_w(w)
 
         return self.act_fn(self.sequence2(self.sequence1(x)))  # (bs, channels[-1], H, W)
+
+
+# test
+if __name__ == "__main__":
+    b, c, h, w = 2, 3, 4, 5
+    w_dim = 6
+    device = "mps"
+    inputs = torch.randn(b, c, h, w).to(device)
+    ws = torch.randn(b, 6).to(device)
+
+    cnn3 = CNN3x3((h, w), [c, c*2, c*4], act_fn=lambda x : -softplus(x), residual=True, sn=True, sln=True, w_dim=w_dim).to(device)
+    out3 = cnn3(inputs, ws)
+
+    cnn1 = CNN1x1((h, w), [c, c*2, c*4], act_fn=lambda x : -softplus(x), sn=False, sln=True, w_dim=w_dim).to(device)
+    out1 = cnn1(inputs, ws)
+
+    print(out3.shape, out1.shape)
 
 

@@ -15,6 +15,7 @@ class GATBlock(nn.Module):
     def __init__(self, emb_dim, adj_matrix, 
                  in_emb_dim=None, num_head=1, dropout=0.0, sn=False, output_atten=False, atten_fn="matmul"):
         super().__init__()
+        self.output_atten = output_atten
         kwargs = {
             "in_emb_dim": in_emb_dim, 
             "num_head": num_head, 
@@ -29,12 +30,15 @@ class GATBlock(nn.Module):
     def forward(self, x):
         # x: (*, node_num, emb_dim)
         n = x.shape[-2]
-        return x + self.attention(x, self.adj_matrix.expand(*x.shape[:-2], n, n))
+        y = self.attention(x, self.adj_matrix.expand(*x.shape[:-2], n, n))
+        if self.output_atten:
+            return x + y[0], y[1]
+        return x + y
 
 
 class GAT(nn.Module):
     def __init__(self, emb_dim_in, emb_dim_out, adj_matrix, 
-                 in_emb_dim=None, num_head=1, dropout=0.0, depth=1, output_atten=False, sn=False, sln=False, w_dim=None, atten_fn="dense"):
+                 in_emb_dim=None, num_head=1, dropout=0.0, depth=1, sn=False, sln=False, w_dim=None, output_atten=False, atten_fn="dense"):
         super().__init__()
         self.emb_dim_in = emb_dim_in
         self.emb_dim_out = emb_dim_out
@@ -72,7 +76,7 @@ class GAT(nn.Module):
         if self.sln:
             for norm in self.norms:
                 norm.set_w(w)
-        for gat_block in self.gat_blocks:
+        for i, gat_block in enumerate(self.gat_blocks):
             x, atten_agg = gat_block(x)
             x = self.norms[i](x)
             if atten is None:
@@ -117,7 +121,9 @@ class GT(nn.Module):
         self.transformer = TransformerEncoder(emb_dim_out, **kwargs)
 
         self.adj_matrix = adj_matrix
-        self.e, self.v = torch.linalg.eigh(adj_matrix)
+        self.e, self.v = torch.linalg.eigh(adj_matrix.to("cpu"))
+        self.e = self.e.to(adj_matrix.device)
+        self.v = self.v.to(adj_matrix.device)
 
     def forward(self, x, w=None):
         x = self.f0(x)
@@ -126,4 +132,27 @@ class GT(nn.Module):
             enc = enc.expand(x.shape[0], *enc.shape)
         return self.transformer(x, enc=enc, w=w)
 
-    
+
+# test
+if __name__ == "__main__":
+    device = "mps"
+    bs = 3
+    emb_dim_in = 4
+    emb_dim_out = 5
+    node_num = 6
+    adj_matrix = torch.randint(0, 2, (node_num, node_num), device=device).to(torch.float32)
+    w_dim = 7
+
+    gat = GAT(emb_dim_in, emb_dim_out, adj_matrix,
+                 in_emb_dim=None, num_head=2, dropout=0.1, depth=2, output_atten=True, sn=True, sln=False, w_dim=w_dim, atten_fn="dense").to(device)
+    x = torch.randn((bs, node_num, emb_dim_in), device=device)
+    w = torch.randn((bs, w_dim), device=device)
+
+    out1, atten1 = gat(x, w)
+    print(out1.shape, atten1.shape)
+
+    gt = GT(emb_dim_in, emb_dim_out, adj_matrix,
+                    enc_dim=3, in_emb_dim=None, num_head=2, dropout=0.0, depth=2, pre_norm=True, sn=True, sln=True, w_dim=w_dim, output_atten=True).to(device)
+    out2, attens2 = gt(x, w)
+    print(out2.shape, attens2[0].shape)
+
