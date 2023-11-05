@@ -1,9 +1,9 @@
 import torch
 from torch import tensor, nn, optim
 import torch.nn.functional as F
-from cnn import CNN2L
-from transformer import Transformer
-from general import FF, SLN
+from models.cnn import CNN3x3
+from models.gnn import GT
+from models.general import FF, SLN
 
 import numpy as np
 
@@ -15,12 +15,11 @@ class CNNGen(nn.Module):
         self.output_channel = output_channel
         self.max_num = max_num
 
-        self.input_feature = self.nw_data.feature_num + self.nw_data.context_feature_num
-        self.cnn = CNN2L(self.input_feature, self.output_channel, sln=sln, w_dim=w_dim)  # forward: (B, C, 3, 3)->(B, C', 3, 3)
-
+        self.total_feature = self.nw_data.feature_num + self.nw_data.context_feature_num
+        self.cnn = CNN3x3((3, 3), (self.total_feature, self.total_feature*4, self.output_channel), residual=True, sn=False, sln=sln, w_dim=w_dim)  # forward: (B, C, 3, 3)->(B, C', 3, 3)
 
     def forward(self, input, i, w=None):
-        # input: (sum(links), input_feature, 3, 3)
+        # input: (sum(links), total_feature, 3, 3)
         # output: (sum(links), 3, 3)
         # model output: (sum(links), oc, 3, 3)
         return self.cnn(input, w=w)[:, i, :, :]
@@ -93,33 +92,35 @@ class CNNGen(nn.Module):
 
 
 class GNNGen(nn.Module):
-    def __init__(self, input_channel, output_channel, sln=True, w_dim=None):
+    def __init__(self, nw_data, emb_dim, output_channel, enc_dim, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None):
         super().__init__()
         if sln and w_dim is None:
             raise Exception("w_dim should be specified when sln is True")
 
-        self.input_channel = input_channel
+        self.nw_data = nw_data
+        self.emb_dim = emb_dim
+        self.feature_num = nw_data.feature_num
         self.output_channel = output_channel
+        self.adj_matrix = tensor(nw_data.edge_graph).to_sparse()
         self.sln = sln
         self.w_dim = w_dim
 
-        self.transformer = Transformer(input_channel, output_channel, k=3, dropout=0.1, depth=3, residual=True, sln=sln, w_dim=w_dim)
+        kwargs = {"enc_dim": enc_dim, "in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "depth": depth, "pre_norm": pre_norm, "output_atten": True, "sn": sn, "sln": sln, "w_dim": w_dim}
+        self.gnn = GT(self.feature_num, emb_dim, self.adj_matrix, **kwargs)  # (bs, link_num, emb_dim)
+        self.ff = FF(emb_dim*2, output_channel, sn=sn)
 
-        self.to(self.device)
+    def forward(self, x, i=None, w=None):
+        # x: (bs, link_num, feature_num)
+        # output: (bs, link_num, link_num) or (trip_num, oc, link_num, link_num)
+        y = self.gnn(x, w=w)[0].unsqueeze(-2)  # (bs, link_num, emb_dim)
+        z = torch.cat((y, y.transpose(-3, -2)), dim=-1) # (bs, link_num, link_num, emb_dim*2)
+        logits = self.ff(z).permute(0, 3, 1, 2) * self.adj_matrix.view(1, *self.adj_matrix.shape, 1)
+        logits = torch.where(logits != 0, logits, torch.full_like(logits, -9e15))  # (bs, oc, link_num, link_num)
 
-    def forward(self, x, i, w=None):
-        # x: (bs, link_num, in_channel)
-        # enc: (trip_num, enc_dim)
-        # output: (trip_num, link_num, link_num) or (trip_num, oc, link_num, link_num)
         if i == None:
-            if self.sln:
-                return self.transformer(x, None, w)
-            else:
-                return self.transformer(x, None)
-        if self.sln:
-            return self.transformer(x, None, w)[:, i, :, :]
+            return logits
         else:
-            return self.transformer(x, None)[:, i, :, :]
+            return logits[:, i, :, :]
 
     def save(self, model_dir):
         torch.save(self.state_dict(), model_dir + "/gnngen.pth")

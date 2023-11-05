@@ -5,183 +5,105 @@ from torch import tensor, nn
 import torch.nn.functional as F
 from torch.nn.utils import spectral_norm
 
+import itertools
+
 __all__ = ["CNN2L", "CNN2LDepth", "CNN2LPositive", "CNN2LNegative"]
 
 
-class CNN2L(nn.Module):
-    def __init__(self, input_channel, output_channel, residual=True, sn=False, sln=False, w_dim=None, device="cpu"):
-        # forward: (B, C, 3, 3)->(B, C', 3, 3)
+class CNN3x3(nn.Module):
+    def __init__(self, patch_size, channels, act_fn=lambda x : x, residual=True, sn=False, sln=False, w_dim=None):
+        # patch_size: (H, W)
+        # channels: list
+        # forward: (B, C, H, W)->(B, C', H, W)
         # sn: spectral normalization, sln: self-modulated layer normalization
         super().__init__()
         if sln and w_dim is None:
             raise Exception("w_dim should be specified when sln is True")
 
-        self.input_channel = input_channel
-        self.output_channel = output_channel
+        self.patch_size = patch_size
+        self.channels = channels
+        self.act_fn = act_fn
         self.residual = residual
         self.sn = sn
         self.sln = sln
         self.w_dim = w_dim
-        self.device = device
 
         # convolution
         if not sn:
-            self.cov1 = nn.Conv2d(self.input_channel, self.input_channel*8, 3, padding=1, bias=False) #(bs, in_channel, 3, 3)->(bs, in_channel*8, 3, 3)
-            self.cov2 = nn.Conv2d(self.input_channel*8, self.input_channel*16, 3, padding=1, bias=False) #(bs, in_channel*8, 3, 3)->(bs, in_channel*32, 3, 3)
-            # fully connected(1x1 convolution)
-            self.fc1 = nn.Conv2d(self.input_channel*16, self.input_channel, 1, padding=0, bias=False) #(bs, in_channel*16, 3, 3)->(bs, in_channel, 3, 3)
+            self.covs = nn.ModuleList([nn.Conv2d(channels[i], channels[i+1], 3, padding=1, bias=False) for i in range(len(channels)-1)])  # (bs, channels[i], H, W)->(bs, channels[i+1], H, W)
+            self.fc1 = nn.Conv2d(channels[-1], channels[-1]*2, 1, padding=0, bias=False)  # (bs, channels[-1], H, W)->(bs, channels[-1]*2, H, W)
         else:
-            self.cov1 = spectral_norm(nn.Conv2d(self.input_channel, self.input_channel*8, 3, padding=1, bias=False)) #(bs, in_channel, 3, 3)->(bs, in_channel*8, 3, 3)
-            self.cov2 = spectral_norm(nn.Conv2d(self.input_channel*8, self.input_channel*16, 3, padding=1, bias=False)) #(bs, in_channel*8, 3, 3)->(bs, in_channel*32, 3, 3)
-            # fully connected(1x1 convolution)
-            self.fc1 = spectral_norm(nn.Conv2d(self.input_channel*16, self.input_channel, 1, padding=0, bias=False)) #(bs, in_channel*16, 3, 3)->(bs, in_channel, 3, 3)
-        self.fc2 = nn.Conv2d(self.input_channel + self.input_channel * residual, self.output_channel, 1, padding=0, bias=False)  #(bs, in_channel*2, 3, 3)->(bs, oc, 3, 3)
+            self.covs = nn.ModuleList([spectral_norm(nn.Conv2d(channels[i], channels[i+1], 3, padding=1, bias=False)) for i in range(len(channels)-1)])  # (bs, channels[i], H, W)->(bs, channels[i+1], H, W)
+            self.fc1 = spectral_norm(nn.Conv2d(channels[-1], channels[-1]*2, 1, padding=0, bias=False))  # (bs, channels[-1], H, W)->(bs, channels[-1]*2, H, W)
+        self.fc2 = nn.Conv2d(channels[-1]*2 + channels[0] * residual, channels[-1], 1, padding=0, bias=False)  #(bs, channels[-1]*2+channels[0], H, W)->(bs, channels[-1], H, W)
 
         if not sln:
-            self.layer_norm1 = nn.LayerNorm((self.input_channel, 3, 3))
-            self.layer_norm2 = nn.LayerNorm((self.input_channel*16, 3, 3))
+            self.layer_norms = nn.MoudleList([nn.LayerNorm((channels[i], *self.patch_size)) for i in range(len(channels))])
         else:
-            self.layer_norm1 = SLN(self.w_dim, self.input_channel)
-            self.layer_norm2 = SLN(self.w_dim, self.input_channel*16)
+            self.layer_norms = nn.MoudleList([SLN(w_dim, (channels[i], *self.patch_size)) for i in range(len(channels))])
 
-        self.sequence1 = nn.Sequential(
-            self.cov1,
-            Softplus(),
-            nn.AvgPool2d(3, stride=1, padding=1),
-            self.cov2,
-            Softplus(),
-            nn.AvgPool2d(3, stride=1, padding=1)
-        )
-        self.sequence2 = nn.Sequential(
-            self.fc1,
-            Softplus()
-        )
-        self.sequence3 = nn.Sequential(
-            self.fc2
-        )
-
-        self.to(self.device)
+        # layer_norm->conv->softplus->...
+        self.sequence1 = nn.Sequential(*itertools.chain(*zip(self.layer_norms[:-1], self.covs, [Softplus()] * (len(channels)-1))))
+        self.sequence2 = nn.Sequential(self.layer_norms[-1], self.fc1, Softplus())
 
     def forward(self, x, w=None):
+        # x: (bs, channels[0], H, W)
+        # w: (bs, w_dim)
         if self.sln and w is None:
             raise Exception("w should be specified when sln is True")
-        x_reshape = x.reshape(-1, self.input_channel, 9).transpose(1, 2)  # (bs, 9, c)
+        
         if self.sln:
-            # w: (bs, w_dim)
-            w_reshape = w.unsqueeze(1).repeat(1, 9, 1)
-        if self.sln:
-            x_norm = self.layer_norm1(x_reshape, w_reshape).transpose(1, 2)
-        else:
-            x_norm = self.layer_norm1(x).transpose(1, 2)
-        y = self.sequence1(x_norm.reshape(-1, self.input_channel, 3, 3))
+            for i in range(len(self.channels)):
+                self.layer_norms[i].set_w(w)
 
-        y_reshape = y.reshape(-1, self.input_channel*16, 9).transpose(1, 2)  # (bs, 9, c)
-        if self.sln:
-            y_norm = self.layer_norm2(y_reshape, w_reshape)
-        else:
-            y_norm = self.layer_norm2(y_reshape)
-        z = self.sequence2(y_norm.transpose(1, 2).reshape(-1, self.input_channel*16, 3, 3))
-
+        y = self.sequence2(self.sequence1(x))  # (bs, channels[-1]*2, H, W)
         if self.residual:
-            return self.sequence3(torch.cat([z, x], dim=1))
+            return self.act_fn(self.fc2(torch.cat([y, x], dim=1)))
         else:
-            return self.sequence3(y)
+            return self.act_fn(self.fc2(y))
 
-
-class CNN2LDepth(nn.Module):
-    def __init__(self, input_channel, output_channel, sn=False, sln=False, w_dim=None):
-        # forward: (B, C, 3, 3)->(B, C', 3, 3)
+class CNN1x1(nn.Module):
+    def __init__(self, patch_size, channels, act_fn=lambda x : x, sn=False, sln=False, w_dim=None):
+        # patch_size: (H, W)
+        # channels: list
+        # forward: (B, C, H, W)->(B, C', H, W)
+        # sn: spectral normalization, sln: self-modulated layer normalization
         super().__init__()
         if sln and w_dim is None:
             raise Exception("w_dim should be specified when sln is True")
 
-        self.input_channel = input_channel
-        self.output_channel = output_channel
+        self.patch_size = patch_size
+        self.channels = channels
+        self.act_fn = act_fn
         self.sn = sn
         self.sln = sln
         self.w_dim = w_dim
 
-        if not sln:
-            self.layer_norm = nn.LayerNorm((self.input_channel, 3, 3))
-        else:
-            self.layer_norm = SLN(self.w_dim, self.input_channel)
-
+        # convolution
         if not sn:
-            self.cov1 = nn.Conv2d(self.input_channel, self.input_channel*16, 1, padding=0, bias=False)
-            self.cov2 = nn.Conv2d(self.input_channel*16, self.output_channel, 1, padding=0, bias=False)
+            self.covs = nn.ModuleList([nn.Conv2d(channels[i], channels[i+1], 1, padding=0, bias=False) for i in range(len(channels)-1)])  # (bs, channels[i], H, W)->(bs, channels[i+1], H, W)
         else:
-            self.cov1 = spectral_norm(nn.Conv2d(self.input_channel, self.input_channel*16, 1, padding=0, bias=False))
-            self.cov2 = spectral_norm(nn.Conv2d(self.input_channel*16, self.output_channel, 1, padding=0, bias=False))
+            self.covs = nn.ModuleList([spectral_norm(nn.Conv2d(channels[i], channels[i+1], 1, padding=0, bias=False)) for i in range(len(channels)-1)])  # (bs, channels[i], H, W)->(bs, channels[i+1], H, W)
 
-        self.sequence = nn.Sequential(
-            self.cov1,
-            self.cov2
-        )
+        if not sln:
+            self.layer_norms = nn.MoudleList([nn.LayerNorm((channels[i], *self.patch_size)) for i in range(len(channels)-1)])
+        else:
+            self.layer_norms = nn.MoudleList([SLN(w_dim, (channels[i], *self.patch_size)) for i in range(len(channels)-1)])
+
+        # layer_norm->conv->softplus->...
+        self.sequence1 = nn.Sequential(*itertools.chain(*zip(self.layer_norms[:-1], self.covs[-1], [Softplus()] * (len(channels)-2))))
+        self.sequence2 = nn.Sequential(self.layer_norms[-1], self.covs[-1])
 
     def forward(self, x, w=None):
+        # x: (bs, channels[0], H, W)
+        # w: (bs, w_dim)
         if self.sln and w is None:
             raise Exception("w should be specified when sln is True")
+        
         if self.sln:
-            x_norm = self.layer_norm(x, w)
-        else:
-            x_norm = self.layer_norm(x)
-        return self.sequence(x_norm)
+            for i in range(len(self.channels)-1):
+                self.layer_norms[i].set_w(w)
 
+        return self.act_fn(self.sequence2(self.sequence1(x)))  # (bs, channels[-1], H, W)
 
-class CNN2LPositive(CNN2L):
-    def __init__(self, *args, **kwards):
-        super().__init__(*args, **kwards)
-        self.sequence3 = nn.Sequential(
-            self.fc2,
-            Softplus()
-        )
-
-    def forward(self, x, w=None):
-        if self.sln and w is None:
-            raise Exception("w should be specified when sln is True")
-        if self.sln:
-            x_norm = self.layer_norm1(x, w)
-        else:
-            x_norm = self.layer_norm1(x)
-        y = self.sequence1(x_norm)
-
-        if self.sln:
-            y_norm = self.layer_norm2(y, w)
-        else:
-            y_norm = self.layer_norm2(y)
-        y = self.sequence2(y_norm)
-
-        if self.residual:
-            return self.sequence3(torch.cat([y, x], dim=1))
-        else:
-            return self.sequence3(y)
-    
-
-class CNN2LNegative(CNN2L):
-    def __init__(self, *args, **kwards):
-        super().__init__(*args, **kwards)
-        self.sequence3 = nn.Sequential(
-            self.fc2,
-            Softplus()
-        )
-
-    def forward(self, x, w=None):
-        if self.sln and w is None:
-            raise Exception("w should be specified when sln is True")
-        if self.sln:
-            x_norm = self.layer_norm1(x, w)
-        else:
-            x_norm = self.layer_norm1(x)
-        y = self.sequence1(x_norm)
-
-        if self.sln:
-            y_norm = self.layer_norm2(y, w)
-        else:
-            y_norm = self.layer_norm2(y)
-        y = self.sequence2(y_norm)
-
-        if self.residual:
-            return -self.sequence3(torch.cat([y, x], dim=1))
-        else:
-            return -self.sequence3(y)
 

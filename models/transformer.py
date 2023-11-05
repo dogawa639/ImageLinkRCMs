@@ -3,127 +3,260 @@ from torch import nn, tensor
 from torch.nn import functional as F
 from torch.nn.utils import spectral_norm
 
-from general import Softplus, SLN
+from general import Softplus, SLN, FF
 
-__all__ = ["AttentionBlock", "Transformer"]
+__all__ = ["MultiHeadAttention", "MultiHeadSelfAttention", "TransformerEncoder", "TransformerDecoder"]
 
 
-class AttentionBlock(nn.Module):
-    # input: (node_num, in_channel), pos_encoding: (node_num, enc_dim)
-    # output: (node_num, out_channel)
-    def __init__(self, in_channel, out_channel, enc_dim, k=1, dropout=0.0, residual=True, sn=False, sln=False, w_dim=None):
-        # k: number of heads
+class MultiHeadAttention(nn.Module):
+    # query: (*, input_channel, emb_dim), key: (*, source_channel, emb_dim), value: (*, source_channel, emb_dim)
+    # output: (*, input_channel, emb_dim)
+    # softmax(QK^T/sqrt(d_k))V
+    def __init__(self, emb_dim, in_emb_dim=None, num_head=1, dropout=0.0,  sn=False, output_atten=False, atten_fn="matmul"):
+        # atten_fn: "matmul" or "dense"
         super().__init__()
-        self.in_channel = in_channel
-        self.out_channel = out_channel
-        self.enc_dim = enc_dim
-        self.k = k
-        self.residual = residual
-        self.sn = sn
+        self.emb_dim = emb_dim
+        self.in_emb_dim = in_emb_dim if in_emb_dim is not None else emb_dim
+        self.num_head = num_head
+        self.dropout = dropout
+        self.output_atten = output_atten
+        self.atten_fn = atten_fn
+
+        self.dropout = nn.Dropout(p=dropout)
+
+        if atten_fn == "dense":
+            self.dense_atten = nn.ModuleList([nn.Linear(emb_dim, 1, bias=False) for _ in range(num_head)])  # emb_dim -> 1
+
+        if sn:
+            self.q_dense = nn.ModuleList([spectral_norm(nn.Linear(emb_dim, self.in_emb_dim, bias=False)) for _ in range(num_head)])
+            self.k_dense = nn.ModuleList([spectral_norm(nn.Linear(emb_dim, self.in_emb_dim, bias=False)) for _ in range(num_head)])
+            self.v_dense = nn.ModuleList([spectral_norm(nn.Linear(emb_dim, self.in_emb_dim, bias=False)) for _ in range(num_head)])
+
+            self.last_dense = spectral_norm(nn.Linear(self.in_emb_dim * num_head, emb_dim, bias=False))
+        else:
+            self.q_dense = nn.ModuleList([nn.Linear(emb_dim, self.in_emb_dim, bias=False) for _ in range(num_head)])
+            self.k_dense = nn.ModuleList([nn.Linear(emb_dim, self.in_emb_dim, bias=False) for _ in range(num_head)])
+            self.v_dense = nn.ModuleList([nn.Linear(emb_dim, self.in_emb_dim, bias=False) for _ in range(num_head)])
+
+            self.last_dense = nn.Linear(self.in_emb_dim * num_head, emb_dim, bias=False)
+
+    def forward(self, q, k, v, mask=None):
+        # mask: None or (*, source_channel) or (*, input_channel, source_channel)
+        input_channel = q.shape[-2]
+        source_channel = k.shape[-2]
+        if source_channel != v.shape[-2]:
+            raise Exception("source_channel and value_channel should be the same")
+        atten_agg = None
+        h_tmp = None
+        for i in range(self.num_head):
+            in_q = self.q_dense[i](q)  # (*, input_channel, in_emb_dim)
+            in_k = self.k_dense[i](k)  # (*, source_channel, in_emb_dim)
+            in_v = self.v_dense[i](v)  # (*, source_channel, in_emb_dim)
+
+            logits = self.atten_mechanism(in_q, in_k, i)  # (*, input_channel, source_channel)
+            if mask is not None:
+                if mask.dim() == atten.dim():
+                    logits = logits * mask
+                else:
+                    logits = logits * mask.unsqueeze(-2)
+            logits = torch.where(logits != 0, logits, torch.full_like(logits, -9e15))
+            atten = F.softmax(logits, dim=-1)  # (*, input_channel, source_channel)
+            if atten_agg is None:
+                atten_agg = atten.clone().detach() / self.num_head
+            else:
+                atten_agg = atten_agg + atten.clone().detach() / self.num_head
+            atten = self.dropout(atten)
+            attentioned = torch.matmul(atten, in_v)  # (*, input_channel, in_emb_dim)
+            if h_tmp is None:
+                h_tmp = attentioned
+            else:
+                h_tmp = torch.cat((h_tmp, attentioned), dim=-1)
+        h = self.last_dense(h_tmp)
+        if self.output_atten:
+            return h, atten_agg
+        else:
+            return h
+        
+    def atten_mechanism(self, in_q, in_k, head):
+        if self.atten_fn == "matmul":
+            logits = torch.matmul(in_q, in_k.transpose(-2, -1)) / (in_k.shape[-2] ** 0.5)
+        elif self.atten_fn == "dense":
+            f1 = self.dense_atten[head](in_q).unsqueeze(-2)  # (*, input_channel, 1, 1)
+            f2 = self.dense_atten[head](in_k).unsqueeze(-3)  # (*, 1, source_channel, 1)
+            logits = f1 + f2
+        return logits
+
+    
+class MultiHeadSelfAttention(MultiHeadAttention):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, x, mask=None):
+        return super().forward(x, x, x, mask=mask)
+    
+
+class TransformerBlock(nn.Module):
+    def __init__(self, emb_dim, in_emb_dim=None, num_head=1, dropout=0.0, pre_norm=False, sn=False, sln=False, w_dim=None):
+        super().__init__()
+        self.emb_dim = emb_dim
+        self.in_emb_dim = in_emb_dim
+        self.num_head = num_head
+        self.dropout = dropout
+        self.pre_norm = pre_norm
         self.sln = sln
         self.w_dim = w_dim
 
         if not sln:
-            self.layer_norm1 = nn.LayerNorm(self.in_channel)
-            self.layer_norm2 = nn.LayerNorm(self.in_channel)
+            self.layer_norm1 = nn.LayerNorm(emb_dim)
+            self.layer_norm2 = nn.LayerNorm(emb_dim)
         else:
             if w_dim is None:
                 raise Exception("w_dim should be specified when sln is True")
-            self.layer_norm1 = SLN(self.w_dim, self.in_channel)
-            self.layer_norm2 = SLN(self.w_dim, self.in_channel)
+            self.layer_norm1 = SLN(w_dim, emb_dim)
+            self.layer_norm2 = SLN(w_dim, emb_dim)
         self.dropout = nn.Dropout(p=dropout)
 
-        if self.enc_dim is not None:
-            self.ff_enc = nn.Linear(self.enc_dim, self.in_channel, bias=True)
-        if not sn:
-            self.ff0 = nn.ModuleList([nn.Linear(self.in_channel, self.in_channel, bias=False) for _ in range(self.k)])
-            self.ff1 = nn.ModuleList([nn.Linear(self.in_channel, self.out_channel, bias=False) for _ in range(self.k)])
-            self.attn_fc = nn.ModuleList([nn.Linear(2 * self.in_channel, 1, bias=False) for _ in range(self.k)])
-        else:
-            self.ff0 = nn.ModuleList([spectral_norm(nn.Linear(self.in_channel, self.in_channel, bias=False)) for _ in range(self.k)])
-            self.ff1 = nn.ModuleList([spectral_norm(nn.Linear(self.in_channel, self.out_channel, bias=False)) for _ in range(self.k)])
-            self.attn_fc = nn.ModuleList([spectral_norm(nn.Linear(2 * self.in_channel, 1, bias=False)) for _ in range(self.k)])
+        self.attention = MultiHeadAttention(emb_dim, in_emb_dim=in_emb_dim, num_head=num_head, dropout=dropout, output_atten=True, sn=sn)  # output: (*, input_channel, emb_dim)
+        self.ff = FF(emb_dim, emb_dim, emb_dim*2, sn=sn)
 
-    def forward(self, x, enc=None, w=None):
-        # x: (bs, link_num, in_channel)
-        # enc: (bs, link_num, enc_dim) positional encoding
-        # w: (bs, w_dim)
-        if enc is not None and x.shape[0] != enc.shape[0]:
-            raise Exception("x and enc should have the same batch size")
-        if w is not None and x.shape[0] != w.shape[0]:
-            raise Exception("x and w should have the same batch size")
-        bs = x.shape[0]
-        n = x.shape[1]
-        if enc is not None:
-            x = x + self.ff_enc(enc)  # (bs, link_num, in_channel)
+        self.w = None
+
+    def forward(self, q, kv=None, mask=None):
+        # q: (bs, input_channel, emb_dim)
+        # kv: None or (bs, source_channel, emb_dim)
+        if self.sln and self.w is None:
+            raise Exception("w should be specified when using sln")
+
+        if self.pre_norm:
+            q = self.layer_norm1(q)
+            if kv is None:
+                h1, atten = self.attention(q, q, q, mask=mask)  # (bs, input_channel, emb_dim)
+            else:
+                h1, atten = self.attention(q, kv, kv, mask=mask)
+            h1 = h1 + q
+
+            h1 = self.dropout(self.layer_norm2(h1))
+            h2 = self.ff(h1)
+            h = h2 + h1
+        else:
+            if kv is None:
+                h1, atten = self.attention(q, q, q, mask=mask)
+            else:
+                h1, atten = self.attention(q, kv, kv, mask=mask)
+            h1 = h1 + q
+            h1 = self.layer_norm1(h1)
+
+            h1 = self.dropout(h1)
+            h2 = self.ff(h1)
+            h = h2 + h1
+            h = self.layer_norm2(h)
+        return h, atten
+    
+    def set_w(self, w):
+        # w: (bs, w_dim) or (w_dim)
+        self.w = w
         if self.sln:
-            w = w.unsqueeze(1).expand(bs, n, -1)
-            x_norm = self.layer_norm1(x, w)
+            self.layer_norm1.set_w(w)
+            self.layer_norm2.set_w(w)
         else:
-            x_norm = self.layer_norm1(x)
-        h_next = torch.zeros((bs, n, self.out_channel), device=x.device)
-        atten_agg = None
-        for i in range(self.k):
-            h = self.ff0[i](x_norm)  # (bs, node_num, in_channel)
-            h_expand = h.unsqueeze(2).expand(bs, n, n, self.in_channel)  # (bs, node_num, 1, in_channel) -> (bs, node_num, node_num, in_channel)
-
-            h_cross = torch.cat((h_expand, h_expand.transpose(1, 2)), 3)  # (bs, node_num, node_num, 2*in_channel) 行ベクタ | 列ベクタ
-            e = F.leaky_relu(self.attn_fc[i](h_cross).squeeze(3))
-
-            atten = F.softmax(e, dim=2)  # (bs, node_num, node_num)
-            atten = self.dropout(atten)
-
-            attentioned = torch.matmul(atten, h)
-            if self.residual:
-                attentioned = attentioned + x
-            if self.sln:
-                attentioned = self.layer_norm2(attentioned, w)
-            else:
-                attentioned = self.layer_norm2(attentioned)
-
-            h_next = h_next + F.elu(self.ff1[i](attentioned)) / self.k  # (bs, node_num, out_channel)
-            if atten_agg is None:
-                atten_agg = atten.clone().detach() / self.k
-            else:
-                atten_agg = atten_agg + atten.clone().detach() / self.k
-        return h_next, atten_agg
+            pass
 
 
-class Transformer(nn.Module):
-    # input: (bs, link_num, input_channel)
-    # output: (bs, link_num, output_channel)
-    def __init__(self, in_channel, out_channel, enc_dim=None, k=1, dropout=0.0, depth=1, residual=True, sn=False, sln=False, w_dim=None):
+class TransformerEncoder(nn.Module):
+    # input, output: (bs, input_channel, emb_dim)
+    def __init__(self, emb_dim, enc_dim=None, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False):
         super().__init__()
-        self.in_channel = in_channel
-        self.out_channel = out_channel
+        self.emb_dim = emb_dim
         self.enc_dim = enc_dim
-        self.k = k
-        self.dropout = dropout
+        self.in_emb_dim = in_emb_dim
+        self.num_head = num_head
         self.depth = depth
-        self.residual = residual
+        self.pre_norm = pre_norm
         self.sn = sn
         self.sln = sln
         self.w_dim = w_dim
+        self.output_atten = output_atten
 
-        kwargs = {"enc_dim": enc_dim, "k": k, "dropout": dropout, "residual": residual, "sn": sn, "sln": sln, "w_dim": w_dim}
-        self.at_blocks = nn.ModuleList([AttentionBlock(in_channel, out_channel, **kwargs)] + [AttentionBlock(out_channel, out_channel, **kwargs) for _ in range(depth - 1)])
+        kwargs = {"in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "pre_norm": pre_norm, "sn": sn, "sln": sln, "w_dim": w_dim}
+        self.tf_blocks = nn.ModuleList([TransformerBlock(emb_dim, **kwargs) for _ in range(depth)])
+        if enc_dim is not None:
+            self.ff_enc = FF(enc_dim, emb_dim, enc_dim*2, bias=False)
 
-    def forward(self, x, enc, w=None):
-        # x: (bs, link_num, input_channel)
-        # enc: None or (bs, link_num, enc_dim)
-        # w: None or (bs, w_dim)
+    def forward(self, x, enc, mask=None, w=None):
+        # x: (bs, input_channel, emb_dim)
+        # enc: None or (bs, input_channel, enc_dim)
+        # w: None or (bs, w_dim) or (w_dim)
         if x.dim() != 3:
             raise Exception("x should be 3 dim")
-        atten = None
-        for i, at_block in enumerate(self.at_blocks):
-            if i == 0:
-                x, atten_agg = at_block(x, enc, w)
+        if enc is not None:
+            x = x + self.ff_enc(enc)
+        attens = []
+        for tf_block in self.tf_blocks:
+            tf_block.set_w(w)
+            x, atten = tf_block(x, mask=mask)
+            attens.append(atten)
+        return x, attens
+    
+class TransformerDecoder(nn.Module):
+    # q: (bs, input_channel, emb_dim)
+    # k, v: (bs, source_channel, enc_dim)
+    def __init__(self, emb_dim, enc_dim=None, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False):
+        super().__init__()
+        self.emb_dim = emb_dim
+        self.enc_dim = enc_dim
+        self.in_emb_dim = in_emb_dim
+        self.num_head = num_head
+        self.depth = depth
+        self.pre_norm = pre_norm
+        self.sn = sn
+        self.sln = sln
+        self.w_dim = w_dim
+        self.output_atten = output_atten
+
+        kwargs = {"in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "sn": sn}
+        self.self_attentions = nn.ModuleList([MultiHeadSelfAttention(emb_dim, **kwargs) for _ in range(depth)])
+        if not sln:
+            self.norms = nn.ModuleList([nn.LayerNorm(emb_dim) for _ in range(depth)])
+        else:
+            if w_dim is None:
+                raise Exception("w_dim should be specified when sln is True")
+            self.norms = nn.ModuleList([SLN(w_dim, emb_dim) for _ in range(depth)])
+
+        kwargs = {"in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "pre_norm": pre_norm, "sn": sn, "sln": sln, "w_dim": w_dim}
+        self.tf_blocks = nn.ModuleList([TransformerBlock(emb_dim, **kwargs) for _ in range(depth)])
+
+        if enc_dim is not None:
+            self.ff_enc = FF(enc_dim, emb_dim, enc_dim*2, bias=False)
+
+    def forward(self, x, enc, kv, mask=None, w=None):
+        # x: (bs, input_channel, emb_dim)
+        # enc: None or (bs, input_channel, enc_dim)
+        # kv: (bs, source_channel, enc_dim)
+        # w: None or (bs, w_dim) or (w_dim)
+        if x.dim() != 3:
+            raise Exception("x should be 3 dim")
+        if enc is not None:
+            x = x + self.ff_enc(enc)
+        attens = []
+        for i in range(self.depth):
+            if self.sln:
+                self.norms[i].set_w(w)
+                self.tf_blocks[i].set_w(w)
+            if self.pre_norm:
+                x = self.norms[i](x)
+                h, _ = self.self_attentions[i](x, mask=mask)
+                x = x + h
+                x, atten = self.tf_blocks[i](x, kv, mask=mask)
+                attens.append(atten)
             else:
-                x, atten_agg = at_block(x, w=w)
-            if atten is None:
-                atten = atten_agg
-            else:
-                atten = torch.einsum("bij, bjk -> bik", atten_agg, atten)
-        return x, atten
+                h, _ = self.self_attentions[i](x, mask=mask)
+                x = x + h
+                x = self.norms[i](x)
+                x, atten = self.tf_blocks[i](x, kv, mask=mask)
+                attens.append(atten)
+        return x, attens
+
+
+
     
 

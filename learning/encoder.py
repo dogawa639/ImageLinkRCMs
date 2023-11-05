@@ -2,7 +2,7 @@ import torch
 from torch import tensor, nn, optim
 import torch.nn.functional as F
 from models.deeplabv3 import resnet50, ResNet50_Weights
-from models.transformer import Transformer
+from models.transformer import TransformerEncoder
 from models.gnn import GAT
 from models.general import FF, SLN
 

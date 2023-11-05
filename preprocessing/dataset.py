@@ -98,7 +98,8 @@ class GridDataset(Dataset):
 
     def get_fake_batch(self, real_batch, g_output):
         mask = real_batch[1]
-        next_link_prob = F.softmax(g_output * mask, dim=-1)
+        logits = torch.where(mask > 0, g_output, tensor(-9e15, dtype=torch.float32, device=g_output.device))
+        next_link_prob = F.softmax(logits, dim=-1)
         next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()
         next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
         return real_batch[0], real_batch[1], next_links_one_hot
@@ -157,16 +158,16 @@ class PPEmbedDataset(Dataset):
         adj_matrix = coo_matrix((np.ones(len(row)), (row, col)), shape=(self.link_num, self.link_num), dtype=np.float32).to_csr()
         return adj_matrix
     
-    def get_dataset_from_adj(self, adj_matrix):
-        # adj_matrix: [trip_num, link_num, link_num] tensor(cpu, detached) each element is real
+    def get_dataset_from_logits(self, logits):
+        # logits: [trip_num, link_num, link_num] tensor(cpu, detached) each element is real
         # return: PPEmbedDataset
-        origin = (adj_matrix.sum(axis=1, keepdim=False) > 0) & (adj_matrix.sum(axis=2, keepdim=False) == 0)  # どこからも入ってきていないが，出ていっているリンク (trip_num, link_num)
+        exp_logits = torch.exp(logits)
+        origin = (exp_logits.sum(axis=1, keepdim=False) > 0) & (exp_logits.sum(axis=2, keepdim=False) == 0)  # どこからも入ってきていないが，出ていっているリンク (trip_num, link_num)
         origin = origin[(origin.sum(axis=1) > 0), :]  # originがないtripは除く
         trip_num = origin.shape[0]
 
-        origin = torch.einsum('ijk, ij -> ij', adj_matrix, origin)
-        origin = torch.where(origin > 0, origin, tensor(-9e15, dtype=torch.float32, device=adj_matrix.device))
-        origin_prob = origin.softmax(dim=1)  # (trip_num, link_num)
+        logits_origin = torch.einsum('ijk, ij -> ij', logits, origin)  # (trip_num, link_num)
+        origin_prob = logits_origin.softmax(dim=-1)  # (trip_num, link_num)
 
         paths = [[] for i in range(trip_num)]
         path_links = [{} for i in range(trip_num)]
@@ -179,13 +180,13 @@ class PPEmbedDataset(Dataset):
             prev_idxs[i] = origin_idx.item()
 
         goon = False
-        for _ in range(adj_matrix.shape[1]):
+        for _ in range(logits.shape[1]):
             for i in range(trip_num):
                 prev_idx = prev_idxs[i]
-                if adj_matrix[i, prev_idx, :].sum() == 0:  # 次に移動するリンクがない場合
+                if exp_logits[i, prev_idx, :].sum() == 0:  # 次に移動するリンクがない場合
                     continue
-                next_prob = adj_matrix[i, prev_idx, :].softmax(dim=0)  # (link_num,)
-                next_idx = torch.multinomial(next_prob, num_samples=1)  # (1,)
+                
+                next_idx = torch.multinomial(exp_logits[i, prev_idx, :], num_samples=1)  # (1,)
                 if next_idx in path_links[i]:  # すでに通ったリンクの場合
                     continue
                 paths[i].append(self.nw_data.lids[next_idx.item()])
@@ -206,8 +207,9 @@ class PPEmbedDataset(Dataset):
 
     def get_fake_batch(self, real_batch, g_output):
         mask = real_batch[1]
-        next_link_prob = F.softmax(g_output * mask, dim=-1)
-        next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()
+        g_output = torch.where(mask > 0, g_output, torch.full_like(g_output, -9e15))  # (trip_num, link_num, link_num)
+        next_link_prob = F.softmax(g_output, dim=-1)
+        next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()  # (trip_num * link_num)
         next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
         return real_batch[0], real_batch[1], next_links_one_hot, real_batch[3]
 
