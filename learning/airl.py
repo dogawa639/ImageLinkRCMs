@@ -15,6 +15,7 @@ import os
 
 from utility import *
 from models.general import log
+from logger import Logger
 
 
 class AIRL:
@@ -25,9 +26,9 @@ class AIRL:
         if encoder is not None and image_data is None:
             raise ValueError("image_data must be set when encoder is not None.")
 
-        self.generator = generator
-        self.discriminator = discriminator
-        self.use_index = use_index  # whether inputs are the limited link feature or not
+        self.generator = generator.to(device)
+        self.discriminator = discriminator.to(device)
+        self.use_index = use_index  # whether inputs are the local link feature or not
         self.datasets = datasets  # list of Dataset  train&validation
         self.model_dir = model_dir
         self.use_encoder = encoder is not None
@@ -35,7 +36,7 @@ class AIRL:
         self.h_dim = h_dim
         self.emb_dim = emb_dim
         self.f0 = f0  # h->w
-        self.use_w = self.f0 is not None
+        self.use_w = self
         self.image_data = image_data
         self.hinge_loss = hinge_loss
         self.hinge_thresh = -log(tensor(hinge_thresh, dtype=torch.float32, device=device, requires_grad=False))
@@ -44,9 +45,16 @@ class AIRL:
 
         self.link_num = len(self.datasets[0].nw_data.lids)
         self.output_channel = len(self.datasets)
+
+        if self.encoder is not None:
+            self.encoder = self.encoder.to(device)
+        if self.f0 is not None:
+            self.f0 = self.f0.to(device)
     
-    def train(self, epochs, batch_size, lr_g, lr_d, shuffle,
+    def train(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
               train_ratio=0.8, d_epoch=5, lr_f0=0.01, lr_e=0.01, image_file=None):
+        logger = Logger(os.path.join(self.model_dir, "log.json"), conf_file)  #loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,criteria
+
         optimizer_g = optim.Adam(self.generator.parameters(), lr=lr_g)
         optimizer_d = optim.Adam(self.discriminator.parameters(), lr=lr_d)
         if self.use_w:
@@ -58,10 +66,7 @@ class AIRL:
         dataloaders_real = [[DataLoader(tmp, **dataset_kargs)
                             for tmp in dataset.split_into((train_ratio, 1-train_ratio))]
                             for dataset in self.datasets]  # [train_dataloader, test_dataloader]
-
-        result = {"loss_e": [], "loss_g": [], "loss_d": [],
-                   "loss_e_val": [], "loss_g_val": [], "loss_d_val": [],
-                   "criteria": []}
+        
         min_criteria = 1e10
         for e in range(epochs):
             t1 = time.perf_counter()
@@ -69,7 +74,7 @@ class AIRL:
             epoch_loss_e = []
             epoch_loss_g = []
             epoch_loss_d = []
-            for i, (dataloader_train, dataloader_val) in enumerate(dataloaders_real):
+            for i, (dataloader_train, dataloader_val) in enumerate(dataloaders_real):  # transportation mode
                 # batch
                 # Grid: inputs, masks, next_links, link_idxs, h
                 # Emb: global_state, adj_matrix, transition_matrix, h
@@ -81,7 +86,7 @@ class AIRL:
                 epoch_loss_g_val = []
 
                 self.train()
-                for batch_real in dataloader_train:
+                for batch_real in dataloader_train:  # batch
                     # raw_data retain_grad=True
                     # Grid: (sum(links), 3, 3) corresponds to next_links
                     # Emb: (trip_num, link_num, link_num) sparse, corresponds to transition_matrix
@@ -156,7 +161,7 @@ class AIRL:
                     mode_loss_g_val.append(loss_g.clone().detach().cpu().item())
                     mode_loss_d_val.append(loss_d.clone().detach().cpu().item())
 
-            epoch_loss_e.append(np.mean(mode_loss_e))
+            epoch_loss_e.append(np.mean(mode_loss_e))  # shape [num_modes]
             epoch_loss_g.append(np.mean(mode_loss_g))
             epoch_loss_d.append(np.mean(mode_loss_d))
             epoch_loss_e_val.append(np.mean(mode_loss_e_val))
@@ -169,13 +174,13 @@ class AIRL:
                 self.generator.save(self.model_dir)
                 self.discriminator.save(self.model_dir)
 
-            result["loss_e"].append(epoch_loss_e)
-            result["loss_g"].append(epoch_loss_g)
-            result["loss_d"].append(epoch_loss_d)
-            result["loss_e_val"].append(epoch_loss_e_val)
-            result["loss_g_val"].append(epoch_loss_g_val)
-            result["loss_d_val"].append(epoch_loss_d_val)
-            result["criteria"].append(criteria)
+            logger.add_log("loss_e", epoch_loss_e)
+            logger.add_log("loss_g", epoch_loss_g)
+            logger.add_log("loss_d", epoch_loss_d)
+            logger.add_log("loss_e_val", epoch_loss_e_val)
+            logger.add_log("loss_g_val", epoch_loss_g_val)
+            logger.add_log("loss_d_val", epoch_loss_d_val)
+            logger.add_log("criteria", criteria)
 
             t2 = time.perf_counter()
             print("epoch: {}, loss_e_val: {:.4f}, loss_g_val: {:.4f}, loss_d_val: {:.4f}, criteria: {:.4f}, time: {:.4f}".format(
@@ -187,12 +192,12 @@ class AIRL:
             ax2 = fig.add_subplot(312)
             ax3 = fig.add_subplot(313)
 
-            loss_g = np.array(result["loss_g"])
-            loss_d = np.array(result["loss_d"])
+            loss_g = np.array(logger.data["loss_g"])
+            loss_d = np.array(logger.data["loss_d"])
             for i in range(loss_g.shape[1]):
                 ax1.plot(loss_g[:, i], label="mode {}".format(i))
                 ax2.plot(loss_d[:, i], label="mode {}".format(i))
-            ax3.plot(result["criteria"])
+            ax3.plot(logger.data["criteria"])
 
             ax1.set_xlabel("epoch")
             ax2.set_xlabel("epoch")
@@ -205,9 +210,6 @@ class AIRL:
 
             plt.savefig(image_file)
             plt.close()
-
-        dump_json(result, os.path.join(self.model_dir, "result.json"))
-        return result
 
     def loss(self, raw_data_fake, d_real, d_fake, hinge_loss=False):
         # raw_data_fake, d_fake: same shape, tensor
@@ -248,12 +250,11 @@ class AIRL:
         # w: (bs, w_dim)
         # index: (bs, 9)
         bs = batch[0].shape[0]
-        image_feature_pre = tensor(np.zeros((bs, self.link_num, self.emb_dim), dtype=np.float32), device=self.device)
-        for patches in self.image_data.load_link_patches():
+        image_feature = tensor(np.zeros((bs, self.link_num, self.emb_dim), dtype=np.float32), device=self.device)
+        for source_i, patches in enumerate(self.image_data.load_link_patches()):
             # patches [image_data]
             for i, patch in enumerate(patches):
-                image_feature_pre[:, i, :] = image_feature_pre[:, i, :] + self.encoder(patch, w) / len(self.image_data)  # requires_grad=True
-        image_feature = self.encoder.encode(image_feature_pre)  # (bs, link_num, emb_dim)
+                image_feature[:, i, :] = image_feature[:, i, :] + self.encoder(patch, w, source_i=source_i) / len(self.image_data)  # requires_grad=True (bs, link_num, emb_dim)
 
         # inputs: (bs, c, 3, 3) or (bs, link_num, feature_num)
         if self.use_index:

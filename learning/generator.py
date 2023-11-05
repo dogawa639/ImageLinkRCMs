@@ -92,7 +92,8 @@ class CNNGen(nn.Module):
 
 
 class GNNGen(nn.Module):
-    def __init__(self, nw_data, emb_dim, output_channel, enc_dim, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None):
+    def __init__(self, nw_data, emb_dim, output_channel, enc_dim, 
+                 in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None):
         super().__init__()
         if sln and w_dim is None:
             raise Exception("w_dim should be specified when sln is True")
@@ -105,7 +106,18 @@ class GNNGen(nn.Module):
         self.sln = sln
         self.w_dim = w_dim
 
-        kwargs = {"enc_dim": enc_dim, "in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "depth": depth, "pre_norm": pre_norm, "output_atten": True, "sn": sn, "sln": sln, "w_dim": w_dim}
+        kwargs = {
+            "enc_dim": enc_dim, 
+            "in_emb_dim": in_emb_dim, 
+            "num_head": num_head, 
+            "dropout": dropout, 
+            "depth": depth, 
+            "pre_norm": pre_norm, 
+            "output_atten": True, 
+            "sn": sn, 
+            "sln": sln, 
+            "w_dim": w_dim
+            }
         self.gnn = GT(self.feature_num, emb_dim, self.adj_matrix, **kwargs)  # (bs, link_num, emb_dim)
         self.ff = FF(emb_dim*2, output_channel, sn=sn)
 
@@ -114,7 +126,7 @@ class GNNGen(nn.Module):
         # output: (bs, link_num, link_num) or (trip_num, oc, link_num, link_num)
         y = self.gnn(x, w=w)[0].unsqueeze(-2)  # (bs, link_num, emb_dim)
         z = torch.cat((y, y.transpose(-3, -2)), dim=-1) # (bs, link_num, link_num, emb_dim*2)
-        logits = self.ff(z).permute(0, 3, 1, 2) * self.adj_matrix.view(1, *self.adj_matrix.shape, 1)
+        logits = self.ff(z).permute(0, 3, 1, 2) * self.adj_matrix.view(1, 1, *self.adj_matrix.shape)
         logits = torch.where(logits != 0, logits, torch.full_like(logits, -9e15))  # (bs, oc, link_num, link_num)
 
         if i == None:

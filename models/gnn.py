@@ -12,9 +12,17 @@ __all__ = ["GAT", "GT"]
 class GATBlock(nn.Module):
     # input: (*, node_num, emb_dim), adj_matrix: (node_num, node_num)
     # output: (*, node_num, emb_dim)
-    def __init__(self, emb_dim, adj_matrix, in_emb_dim=None, num_head=1, dropout=0.0, sn=False, output_atten=False, atten_fn="matmul"):
+    def __init__(self, emb_dim, adj_matrix, 
+                 in_emb_dim=None, num_head=1, dropout=0.0, sn=False, output_atten=False, atten_fn="matmul"):
         super().__init__()
-        kwargs = {"in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "output_atten": output_atten, "sn": sn, "atten_fn": atten_fn}
+        kwargs = {
+            "in_emb_dim": in_emb_dim, 
+            "num_head": num_head, 
+            "dropout": dropout, 
+            "output_atten": output_atten, 
+            "sn": sn, 
+            "atten_fn": atten_fn
+            }
         self.attention = MultiHeadSelfAttention(emb_dim, **kwargs)
         self.adj_matrix = adj_matrix
 
@@ -25,7 +33,8 @@ class GATBlock(nn.Module):
 
 
 class GAT(nn.Module):
-    def __init__(self, emb_dim_in, emb_dim_out, adj_matrix, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, output_atten=False, sn=False, sln=False, w_dim=None, atten_fn="dense"):
+    def __init__(self, emb_dim_in, emb_dim_out, adj_matrix, 
+                 in_emb_dim=None, num_head=1, dropout=0.0, depth=1, output_atten=False, sn=False, sln=False, w_dim=None, atten_fn="dense"):
         super().__init__()
         self.emb_dim_in = emb_dim_in
         self.emb_dim_out = emb_dim_out
@@ -41,7 +50,15 @@ class GAT(nn.Module):
         self.adj_matrix = adj_matrix
 
         self.f0 = nn.Linear(emb_dim_in, emb_dim_out, bias=False)
-        kwargs = {"in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "output_atten": output_atten, "sn": sn, "atten_fn": atten_fn}
+        kwargs = {
+            "in_emb_dim": in_emb_dim, 
+            "num_head": num_head, 
+            "dropout": dropout, 
+            "output_atten": output_atten, 
+            "sn": sn, 
+            "atten_fn": 
+            atten_fn
+            }
         self.gat_blocks = nn.ModuleList([GATBlock(emb_dim_out, adj_matrix, **kwargs)] + [GATBlock(emb_dim_out, adj_matrix, **kwargs) for _ in range(depth - 1)])
         
         if not sln:
@@ -69,7 +86,8 @@ class GAT(nn.Module):
 class GT(nn.Module):
     # input: (bs, node_num, emb_dim_in) or (node_num, emb_dim_in), pos_encoding: (node_num, enc_dim)
     # output: (bs, node_num, emb_dim_out) or (node_num, emb_dim_out)
-    def __init__(self, emb_dim_in, emb_dim_out, adj_matrix, enc_dim=3, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False):
+    def __init__(self, emb_dim_in, emb_dim_out, adj_matrix, 
+                 enc_dim=3, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False):
         # k: number of heads
         super().__init__()
         self.emb_dim_in = emb_dim_in
@@ -84,7 +102,18 @@ class GT(nn.Module):
         self.adj_matrix = adj_matrix
 
         self.f0 = nn.Linear(emb_dim_in, emb_dim_out, bias=False)
-        kwargs = {"enc_dim": enc_dim, "in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "depth": depth, "pre_norm": pre_norm, "output_atten": output_atten, "sn": sn, "sln": sln, "w_dim": w_dim}
+        kwargs = {
+            "enc_dim": enc_dim, 
+            "in_emb_dim": in_emb_dim, 
+            "num_head": num_head, 
+            "dropout": dropout, 
+            "depth": depth, 
+            "pre_norm": pre_norm, 
+            "output_atten": output_atten, 
+            "sn": sn,
+            "sln": sln, 
+            "w_dim": w_dim
+            }
         self.transformer = TransformerEncoder(emb_dim_out, **kwargs)
 
         self.adj_matrix = adj_matrix

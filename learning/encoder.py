@@ -38,16 +38,17 @@ class CNNEnc(nn.Module):
             self.resnet50  # output: (bs, 1000)
         )
 
-        # graph encoding
-        self.gnn = GAT(emb_dim, emb_dim, k=1, depth=4, dropout=0.1)
-
     def forward(self, patch, source_i=0, w=None):
-        # no batch
         # patch: (c, h, w)
-        # w: (bs, w_dim)
+        # w: (bs, w_dim) or (w_dim)
+        # output: (bs, emb_dim) or (emb_dim)
         if self.sln and w is None:
             raise Exception("w should be specified when sln is True")
-        x = self.seq(patch)
+        x = self.seq(patch)  # (1000)
+        if w is not None and w.dim() == 2:
+            bs = w.shape[0]
+            x = x.expand(bs, *x.shape)
+
         if self.sln:
             x = self.norm1(x, w)
         else:
@@ -57,13 +58,6 @@ class CNNEnc(nn.Module):
             x = self.norm2(x, w)
         else:
             x = self.norm2(x)
-        return x
-    
-    def encode(self, features):
-        # features: (bs, line_num, emb_dim)
-        x = torch.zeros(features.shape, dtype=torch.float32, device=features.device)
-        for i in range(features.shape[0]):
-            x[i, :, :], atten = self.gnn(features[i, :, :], self.adj_mat)
         return x
 
 

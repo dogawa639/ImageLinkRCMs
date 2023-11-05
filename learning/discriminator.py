@@ -10,7 +10,8 @@ import numpy as np
 
 
 class CNNDis(nn.Module):
-    def __init__(self, nw_data, output_channel, gamma=0.9, max_num=40, sln=True, w_dim=10, ext_coeff=1.0):
+    def __init__(self, nw_data, output_channel, 
+                 gamma=0.9, max_num=40, sln=True, w_dim=10, ext_coeff=1.0):
         super().__init__()
         self.nw_data = nw_data
         self.output_channel = output_channel
@@ -28,14 +29,29 @@ class CNNDis(nn.Module):
 
         self.val = CNN1x1((3, 3), (self.total_feature, self.total_feature*2, output_channel), act_fn=lambda x : -Softplus(x), residual=True, sn=True, sln=sln, w_dim=w_dim)
 
-    def forward(self, input, pi, i):
+    def forward(self, input, pi, i=None):
         # input: (sum(links), total_feature, 3, 3)
         # pi: (sum(links), oc, 3, 3)
         # output: (sum(links), 3, 3)
         # model output: (sum(links), oc, 3, 3)
         ext_input = torch.cat((input[:, :self.feature_num, :, :], pi), dim=1)
-        return (self.util(input) + self.ext_coeff * self.ext(ext_input) + self.gamma * self.val(input)
-                - self.val(input)[:, :, 1, 1].view(-1, self.output_channel, 1, 1))[:, i, :, :]
+        util = self.util(input)
+        ext = self.ext(ext_input)
+        val = self.val(input)
+
+        f_val = util + self.ext_coeff * ext + self.gamma * val - val[:, :, 1, 1].view(-1, self.output_channel, 1, 1)
+        if i is None:
+            return f_val
+        return f_val[:, i, :, :]
+
+    def get_vals(self, input, pi, i):
+        ext_input = torch.cat((input[:, :self.feature_num, :, :], pi), dim=1)
+        util = self.util(input)
+        ext = self.ext(ext_input)
+        val = self.val(input)
+
+        f_val = util + self.ext_coeff * ext + self.gamma * val - val[:, :, 1, 1].view(-1, self.output_channel, 1, 1)
+        return f_val[:, i, :, :], util[:, i, :, :], ext[:, i, :, :], val[:, i, :, :]
 
     def save(self, model_dir):
         torch.save(self.state_dict(), model_dir + "/cnndis.pth")
@@ -45,7 +61,8 @@ class CNNDis(nn.Module):
 
 
 class GNNDis(nn.Module):
-    def __init__(self, nw_data, emb_dim, output_channel, enc_dim, gamma=0.9, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, ext_coeff=1.0):
+    def __init__(self, nw_data, emb_dim, output_channel, enc_dim, 
+                 gamma=0.9, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, ext_coeff=1.0):
         super().__init__()
         self.nw_data = nw_data
         self.emb_dim = emb_dim
@@ -56,17 +73,39 @@ class GNNDis(nn.Module):
         self.sln = sln
         self.w_dim = w_dim
 
-        kargs_local = {"enc_dim": enc_dim, "in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "depth": 1, "pre_norm": pre_norm, "output_atten": True, "sn": sn, "sln": sln, "w_dim": w_dim}  # depth=1
-        kwargs_grobal = {"enc_dim": enc_dim, "in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "depth": depth, "pre_norm": pre_norm, "output_atten": True, "sn": sn, "sln": sln, "w_dim": w_dim}  # depth=depth
+        kargs_local = {
+            "enc_dim": enc_dim,
+            "in_emb_dim": in_emb_dim, 
+            "num_head": num_head, 
+            "dropout": dropout, 
+            "depth": 1,  # depth=1
+            "pre_norm": pre_norm, 
+            "output_atten": True, 
+            "sn": sn, 
+            "sln": sln, 
+            "w_dim": w_dim
+            }
+        kwargs_grobal = {
+            "enc_dim": enc_dim, 
+            "in_emb_dim": in_emb_dim,
+            "num_head": num_head, 
+            "dropout": dropout, 
+            "depth": depth,  # depth=depth
+            "pre_norm": pre_norm, 
+            "output_atten": True, 
+            "sn": sn, 
+            "sln": sln, 
+            "w_dim": w_dim
+            } 
 
-        self.gnn_local = GAT(self.feature_num, self.emb_dim, self.adj_matrix, **kargs_local)
-        self.gnn_grobal = GAT(self.feature_num, self.emb_dim, self.adj_matrix, **kwargs_grobal)
+        self.gnn_local = nn.ModuleList([GAT(self.feature_num, self.emb_dim, self.adj_matrix, **kargs_local) for _ in range(output_channel)])
+        self.gnn_grobal = nn.ModuleList([GAT(self.feature_num, self.emb_dim, self.adj_matrix, **kwargs_grobal) for _ in range(output_channel)])
 
-        self.util = FF(self.emb_dim*2, output_channel, self.emb_dim*2, act_fn=lambda x : -Softplus(x), sn=sn, sln=sln, w_dim=w_dim)  # grobal
+        self.util = FF(self.emb_dim*2, 1, self.emb_dim*2, act_fn=lambda x : -Softplus(x), sn=sn, sln=sln, w_dim=w_dim)  # grobal
 
-        self.ext = FF(self.emb_dim*2+output_channel, output_channel, (self.emb_dim+output_channel)*2, act_fn=lambda x : -Softplus(x), sn=sn, sln=sln, w_dim=w_dim)  # local + pi
+        self.ext = FF(self.emb_dim*2+output_channel, 1, (self.emb_dim+output_channel)*2, act_fn=lambda x : -Softplus(x), sn=sn, sln=sln, w_dim=w_dim)  # local + pi
 
-        self.val = FF(self.emb_dim, output_channel, self.emb_dim*2, act_fn=lambda x : -Softplus(x), sn=sn, sln=sln, w_dim=w_dim)  # grobal
+        self.val = FF(self.emb_dim, 1, self.emb_dim*2, act_fn=lambda x : -Softplus(x), sn=sn, sln=sln, w_dim=w_dim)  # grobal
 
     def forward(self, x, bs, pi, i=None, enc=None, w=None):
         # x: (trip_num, link_num, feature_num) or (link_num, feature_num)
@@ -82,23 +121,35 @@ class GNNDis(nn.Module):
             else:
                 raise Exception("enc should be 2 or 3 dim")
         x_rep = x.expand(bs, x.shape[-2], x.shape[-1])
-        y = self.gnn_grobal(x_rep, enc, w)[0]  # (bs, link_num, emb_dim)
+        if i is None:
+            f_val = None
+            for j in range(self.output_channel):
+                f_val_j = self.get_vals(x_rep, pi, j, enc, w)[0].unsqueeze(1)
+                if f_val is None:
+                    f_val = f_val_j
+                else:
+                    f_val = torch.cat((f_val, f_val_j), dim=1)
+            return f_val[:, i, :, :]
+        return self.get_vals(x_rep, pi, i, enc, w)[0]
+    
+    def get_vals(self, x_rep, pi, i, enc, w):
+        # (f_val, util, ext, val)
+        # f_val, util, ext: (bs, link_num, link_num)
+        # val: (bs, link_num)
+        y = self.gnn_grobal[i](x_rep, enc, w)[0]  # (bs, link_num, emb_dim)
 
-        val = self.val(y).permute(0, 2, 1)  # (bs, output_channel link_num)
+        val = self.val(y).squeese(-1)  # (bs, link_num)
         
         y = y.unsqueeze(-2)  # (bs, link_num, 1, emb_dim)
         z = torch.cat((y, y.transpose(-3, -2)), dim=-1)  # (bs, link_num, link_num, emb_dim*2)
-        util = self.util(z).permute(0, 3, 1, 2) * self.adj_matrix.view(1, *self.adj_matrix.shape, 1)  # (bs, output_channel link_num, link_num)
+        util = self.util(z).squeese(-1) * self.adj_matrix.view(1, *self.adj_matrix.shape)  # (bs, link_num, link_num)
 
-        y = self.gnn_local(x_rep, enc, w)[0].unsqueeze(-2)  # (bs, link_num, emb_dim)
+        y = self.gnn_local[i](x_rep, enc, w)[0].unsqueeze(-2)  # (bs, link_num, 1, emb_dim)
         z = torch.cat((y, y.transpose(-3, -2)), dim=-1)  # (bs, link_num, link_num, emb_dim*2)
-        ext = self.ext(torch.cat((z, pi), dim=-1)).permute(0, 3, 1, 2) * self.adj_matrix.view(1, *self.adj_matrix.shape, 1)  # (bs, output_channel link_num, link_num)
+        ext = self.ext(torch.cat((z, pi), dim=-1)).squeese(-1) * self.adj_matrix.view(1, *self.adj_matrix.shape)  # (bs, link_num, link_num)
 
         f_val = util + self.ext_coeff * ext + self.gamma * val.unsqueeze(-2) - val.unsqueeze(-1)
-        if i == None:
-            return f_val
-        else:
-            return f_val[:, i, :, :]
+        return f_val, util, ext, val
 
 
 # test

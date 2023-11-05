@@ -12,7 +12,8 @@ class MultiHeadAttention(nn.Module):
     # query: (*, input_channel, emb_dim), key: (*, source_channel, emb_dim), value: (*, source_channel, emb_dim)
     # output: (*, input_channel, emb_dim)
     # softmax(QK^T/sqrt(d_k))V
-    def __init__(self, emb_dim, in_emb_dim=None, num_head=1, dropout=0.0,  sn=False, output_atten=False, atten_fn="matmul"):
+    def __init__(self, emb_dim, 
+                 in_emb_dim=None, num_head=1, dropout=0.0,  sn=False, output_atten=False, atten_fn="matmul"):
         # atten_fn: "matmul" or "dense"
         super().__init__()
         self.emb_dim = emb_dim
@@ -96,7 +97,8 @@ class MultiHeadSelfAttention(MultiHeadAttention):
     
 
 class TransformerBlock(nn.Module):
-    def __init__(self, emb_dim, in_emb_dim=None, num_head=1, dropout=0.0, pre_norm=False, sn=False, sln=False, w_dim=None):
+    def __init__(self, emb_dim, 
+                 in_emb_dim=None, num_head=1, dropout=0.0, pre_norm=False, sn=False, sln=False, w_dim=None):
         super().__init__()
         self.emb_dim = emb_dim
         self.in_emb_dim = in_emb_dim
@@ -164,7 +166,8 @@ class TransformerBlock(nn.Module):
 
 class TransformerEncoder(nn.Module):
     # input, output: (bs, input_channel, emb_dim)
-    def __init__(self, emb_dim, enc_dim=None, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False):
+    def __init__(self, emb_dim, 
+                 enc_dim=None, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False):
         super().__init__()
         self.emb_dim = emb_dim
         self.enc_dim = enc_dim
@@ -177,7 +180,15 @@ class TransformerEncoder(nn.Module):
         self.w_dim = w_dim
         self.output_atten = output_atten
 
-        kwargs = {"in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "pre_norm": pre_norm, "sn": sn, "sln": sln, "w_dim": w_dim}
+        kwargs = {
+            "in_emb_dim": in_emb_dim, 
+            "num_head": num_head, 
+            "dropout": dropout, 
+            "pre_norm": pre_norm, 
+            "sn": sn, 
+            "sln": sln, 
+            "w_dim": w_dim
+            }
         self.tf_blocks = nn.ModuleList([TransformerBlock(emb_dim, **kwargs) for _ in range(depth)])
         if enc_dim is not None:
             self.ff_enc = FF(enc_dim, emb_dim, enc_dim*2, bias=False)
@@ -195,12 +206,15 @@ class TransformerEncoder(nn.Module):
             tf_block.set_w(w)
             x, atten = tf_block(x, mask=mask)
             attens.append(atten)
-        return x, attens
+        if self.output_atten:
+            return x, attens
+        return x
     
 class TransformerDecoder(nn.Module):
     # q: (bs, input_channel, emb_dim)
     # k, v: (bs, source_channel, enc_dim)
-    def __init__(self, emb_dim, enc_dim=None, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False):
+    def __init__(self, emb_dim, 
+                 enc_dim=None, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False):
         super().__init__()
         self.emb_dim = emb_dim
         self.enc_dim = enc_dim
@@ -213,7 +227,12 @@ class TransformerDecoder(nn.Module):
         self.w_dim = w_dim
         self.output_atten = output_atten
 
-        kwargs = {"in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "sn": sn}
+        kwargs = {
+            "in_emb_dim": in_emb_dim, 
+            "num_head": num_head, 
+            "dropout": dropout, 
+            "sn": sn
+            }
         self.self_attentions = nn.ModuleList([MultiHeadSelfAttention(emb_dim, **kwargs) for _ in range(depth)])
         if not sln:
             self.norms = nn.ModuleList([nn.LayerNorm(emb_dim) for _ in range(depth)])
@@ -222,7 +241,15 @@ class TransformerDecoder(nn.Module):
                 raise Exception("w_dim should be specified when sln is True")
             self.norms = nn.ModuleList([SLN(w_dim, emb_dim) for _ in range(depth)])
 
-        kwargs = {"in_emb_dim": in_emb_dim, "num_head": num_head, "dropout": dropout, "pre_norm": pre_norm, "sn": sn, "sln": sln, "w_dim": w_dim}
+        kwargs = {
+            "in_emb_dim": in_emb_dim, 
+            "num_head": num_head, 
+            "dropout": dropout, 
+            "pre_norm": pre_norm, 
+            "sn": sn, 
+            "sln": sln, 
+            "w_dim": w_dim
+            }
         self.tf_blocks = nn.ModuleList([TransformerBlock(emb_dim, **kwargs) for _ in range(depth)])
 
         if enc_dim is not None:
