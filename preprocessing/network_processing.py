@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import shapely
+import osmnx as ox
+
 import scipy
 from scipy import sparse
 from scipy.sparse import csr_matrix, coo_matrix
@@ -53,6 +56,11 @@ class Edge:
         self.end = end
         self.length = self.get_length(start, end)
         self.angle = self.get_angle(start, end)
+        if self.length == 0:
+            self.e = (0, 0)
+        else:
+            self.e = ((end.x - start.x) / self.length, (end.y - start.y) / self.length)
+        self.n = (-self.e[1], self.e[0])
         self.undir_id = -1  # undirected link id
 
         self.prop = {"length": self.length, "angle": self.angle}
@@ -239,6 +247,31 @@ class NetworkBase:
         self.sc_link.mean_ = params[0]
         self.sc_link.scale_ = params[1]
 
+    def plot_link(self, link_ids, colors=None, ax=None, cmap="jet"):
+        width, headwidth, headlength = 0.002, 2, 2.5
+        if ax is None:
+            fig, ax = plt.subplots()
+            plt.set_aspect('equal')
+        if colors is None:
+            colors = ["black" for _ in link_ids]
+        else:
+            cm = plt.get_cmap(cmap)
+            v_max, v_min = np.max(colors), np.min(colors)
+            colors = [cm((color - v_min) / (v_max - v_min)) for color in colors]
+            norm = plt.Normalize(vmin=v_min, vmax=v_max)
+            sm = plt.cm.ScalarMappable(cmap=cm, norm=norm)
+            plt.colorbar(sm, ax=ax)
+
+        for i, lid in enumerate(link_ids):
+            edge = self.edges[lid]
+            dx, dy = 0, 0
+            if len(self.undir_edges[edge.undir_id]) > 1:  # inv link exists
+                dx, dy = edge.n
+                dx *= 2
+                dy *= 2
+            ax.quiver([edge.start.x + dx, edge.end.x + dx], [edge.start.y + dy, edge.end.y + dy], color=colors[i], width=width, headwidth=headwidth, headlength=headlength, angles="xy", scale_units="xy", scale=1)
+        return ax
+
     # functions for inside processing
     def _trim_duplicate(self):
         dup = self.link.duplicated(subset="id", keep="first")
@@ -329,6 +362,18 @@ class NetworkBase:
         if dx < 0:
             arctan += 180.0
         return arctan % 360
+    
+    @staticmethod
+    def get_from_osm(polygon_coord, utm_num, node_path, link_path, link_prop_path=None):
+        # osmnx
+        # poligon_coord: [(lon, lat)]
+        # utm_num: 平面直交座標系番号
+        # node_path: nodeのcsvファイルのパス [id, lon, lat]
+        # link_path: linkのcsvファイルのパス [id, start, end]
+        # return: node, link
+        
+        bounding_box = shapely.geometry.Polygon(polygon_coord)
+        drive_net = ox.graph.graph_from_polygon(bounding_box, simplify=True, retain_all=False, network_type='drive')
 
     @property
     def feature_num(self):
