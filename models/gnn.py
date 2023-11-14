@@ -25,7 +25,7 @@ class GATBlock(nn.Module):
             "atten_fn": atten_fn
             }
         self.attention = MultiHeadSelfAttention(emb_dim, **kwargs)
-        self.adj_matrix = adj_matrix
+        self.adj_matrix = nn.parameter.Parameter(adj_matrix, requires_grad=False)
 
     def forward(self, x):
         # x: (*, node_num, emb_dim)
@@ -51,7 +51,7 @@ class GAT(nn.Module):
         self.w_dim = w_dim
         self.atten_fn = atten_fn
 
-        self.adj_matrix = adj_matrix
+        self.adj_matrix = nn.parameter.Parameter(adj_matrix, requires_grad=False)
 
         self.f0 = nn.Linear(emb_dim_in, emb_dim_out, bias=False)
         kwargs = {
@@ -103,8 +103,6 @@ class GT(nn.Module):
         self.depth = depth
         self.output_atten = output_atten
 
-        self.adj_matrix = adj_matrix
-
         self.f0 = nn.Linear(emb_dim_in, emb_dim_out, bias=False)
         kwargs = {
             "enc_dim": enc_dim, 
@@ -120,14 +118,14 @@ class GT(nn.Module):
             }
         self.transformer = TransformerEncoder(emb_dim_out, **kwargs)
 
-        self.adj_matrix = adj_matrix
-        self.e, self.v = torch.linalg.eigh(adj_matrix.to("cpu"))
-        self.e = self.e.to(adj_matrix.device)
-        self.v = self.v.to(adj_matrix.device)
+        self.adj_matrix = nn.parameter.Parameter(adj_matrix.to(torch.float32).to_dense(), requires_grad=False)
+        self.e, self.v = torch.linalg.eigh(adj_matrix.to("cpu").to_dense())
+        self.e = nn.parameter.Parameter(self.e.to(adj_matrix.device), requires_grad=False)
+        self.v = nn.parameter.Parameter(self.v.to(adj_matrix.device), requires_grad=False)
 
     def forward(self, x, w=None):
         x = self.f0(x)
-        enc=self.v[:, :self.enc_dim]
+        enc = self.v[:, :self.enc_dim]
         if x.dim() == 3:
             enc = enc.expand(x.shape[0], *enc.shape)
         return self.transformer(x, enc=enc, w=w)
@@ -140,7 +138,7 @@ if __name__ == "__main__":
     emb_dim_in = 4
     emb_dim_out = 5
     node_num = 6
-    adj_matrix = torch.randint(0, 2, (node_num, node_num), device=device).to(torch.float32)
+    adj_matrix = torch.randint(0, 2, (node_num, node_num)).to(torch.float32)
     w_dim = 7
 
     gat = GAT(emb_dim_in, emb_dim_out, adj_matrix,

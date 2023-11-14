@@ -3,7 +3,7 @@ from torch import nn, tensor
 from torch.nn import functional as F
 from torch.nn.utils import spectral_norm
 
-from general import Softplus, SLN, FF
+from models.general import Softplus, SLN, FF
 
 __all__ = ["MultiHeadAttention", "MultiHeadSelfAttention", "TransformerEncoder", "TransformerDecoder"]
 
@@ -26,7 +26,7 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
         if atten_fn == "dense":
-            self.dense_atten = nn.ModuleList([nn.Linear(emb_dim, 1, bias=False) for _ in range(num_head)])  # emb_dim -> 1
+            self.dense_atten = nn.ModuleList([nn.Linear(self.in_emb_dim, 1, bias=False) for _ in range(num_head)])  # emb_dim -> 1
 
         if sn:
             self.q_dense = nn.ModuleList([spectral_norm(nn.Linear(emb_dim, self.in_emb_dim, bias=False)) for _ in range(num_head)])

@@ -26,11 +26,11 @@ class Softplus(nn.Module):
 
 
 class FF(nn.Module):
-    def __init__(self, input_channel, output_channel, hidden_channel, act_fn=lambda x : x, bias=True, sn=False):
+    def __init__(self, input_channel, output_channel, hidden_channel=None, act_fn=lambda x : x, bias=True, sn=False):
         super().__init__()
         self.input_channel = input_channel
         self.output_channel = output_channel
-        self.hidden_channel = hidden_channel
+        self.hidden_channel = hidden_channel if hidden_channel is not None else input_channel*2
         self.act_fn = act_fn
 
         if sn:

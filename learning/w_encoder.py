@@ -7,7 +7,7 @@ from models.general import FF
 import numpy as np
 
 class CNNWEnc(nn.Module):
-    # input: (sum(links), total_feature, 3, 3)
+    # inputs: (sum(links), total_feature, 3, 3), g_output: (sum(links), 3, 3)
     # output: (sum(links), 3, 3)
     def __init__(self, total_feature, w_dim):
         super().__init__()
@@ -17,15 +17,16 @@ class CNNWEnc(nn.Module):
 
         self.lin = FF(total_feature, w_dim, total_feature*2, bias=True)
 
-    def forward(self, input, g_output):
+    def forward(self, inputs, g_output):
         # g_output: prob of each link
         g_output = g_output.unsqueeze(1)
-        feature = (input * g_output).sum((0, 2, 3)) / g_output.sum()  # (total_feature)
+        feature = (inputs * g_output).sum((0, 2, 3)) / g_output.sum()  # (total_feature)
         w = self.lin(feature)
-        return w
+        return w  # (w_dim)
     
 class GNNWEnc(nn.Module):
-    # input: (bs, link_num, feature_num)
+    # inputs: (bs, link_num, feature_num)
+    # g_output: (bs, link_num, link_num)
     # output: (bs, link_num, link_num)
     def __init__(self, feature_num, emb_dim, w_dim, adj_matrix):
         super().__init__()
@@ -34,13 +35,39 @@ class GNNWEnc(nn.Module):
         self.gnn = GT(feature_num, emb_dim, adj_matrix, **kwargs)
         self.lin = FF(emb_dim*2, w_dim, emb_dim*4, bias=True)
 
-    def forward(self, input, g_output):
+    def forward(self, inputs, g_output):
         # g_output: prob of link transition
-        features = self.gnn(input)
-        features = torch.cat((features.unsqueeze(1), features.unsqueeze(2)), dim=-1)  # (bs, link_num, link_num, emb_dim*2)
-        features = (features * g_output.unsqueeze(-1)).sum((0, 1, 2)) / g_output.sum()  # (emb_dim*2)
+        n = inputs.shape[1]
+        features = self.gnn(inputs)
+        features = torch.cat((features.unsqueeze(1).expand(-1, n, n, -1), features.unsqueeze(2).expand(-1, n, n, -1)), dim=-1)  # (bs, link_num, link_num, emb_dim*2)
+        features = (features * g_output.unsqueeze(-1)).sum((1, 2)) / g_output.sum()  # (emb_dim*2)
         w = self.lin(features)
-        return w
+        return w  # (bs, w_dim
+
+
+# test
+if __name__ == "__main__":
+    device = "mps"
+    bs = 2
+    feature_num = 3
+    emb_dim = 4
+    w_dim = 5
+    link_num = 6
+    adj_matrix = torch.randint(0, 2, (link_num, link_num), device=device).to(torch.float32)
+
+    cnnwenc = CNNWEnc(feature_num, w_dim).to(device)
+    inputs = torch.randn((bs, feature_num, 3, 3), device=device)
+    g_output = torch.randn((bs, 3, 3), device=device)
+
+    w_cnn = cnnwenc(inputs, g_output)
+
+    gnnwenc = GNNWEnc(feature_num, emb_dim, w_dim, adj_matrix).to(device)
+    inputs = torch.randn((bs, link_num, feature_num), device=device)
+    g_output = torch.randn((bs, link_num, link_num), device=device)
+
+    w_gnn = gnnwenc(inputs, g_output)
+
+    print(w_cnn.shape, w_gnn.shape)
 
 
 

@@ -20,7 +20,7 @@ from logger import Logger
 
 class AIRL:
     def __init__(self, generator, discriminator, use_index, datasets, model_dir, image_data=None, encoder=None, h_dim=10, emb_dim=10, f0=None,
-                 hinge_loss=False, hinge_thresh=0.5, device="cpu", sln=False):
+                 hinge_loss=False, hinge_thresh=0.5, device="cpu"):
         if hinge_thresh > 1.0 or hinge_thresh < 0.0:
             raise ValueError("hinge_thresh must be in [0, 1].")
         if encoder is not None and image_data is None:
@@ -36,19 +36,20 @@ class AIRL:
         self.h_dim = h_dim
         self.emb_dim = emb_dim
         self.f0 = f0  # h->w
-        self.use_w = self
+        self.use_w = f0 is not None
         self.image_data = image_data
         self.hinge_loss = hinge_loss
         self.hinge_thresh = -log(tensor(hinge_thresh, dtype=torch.float32, device=device, requires_grad=False))
         self.device = device
-        self.sln = sln
+
+        self.sln = self.use_w
 
         self.link_num = len(self.datasets[0].nw_data.lids)
         self.output_channel = len(self.datasets)
 
-        if self.encoder is not None:
+        if self.use_encoder:
             self.encoder = self.encoder.to(device)
-        if self.f0 is not None:
+        if self.use_w:
             self.f0 = self.f0.to(device)
     
     def train(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
@@ -224,7 +225,6 @@ class AIRL:
                 l_g = -log(g_rate * d_f) + log(1. - g_rate * d_f)
                 l_d = -log(d_r) - log(1. - d_f)
 
-
             l_g = l_g.sum()
             l_d = l_d.sum()
 
@@ -261,9 +261,9 @@ class AIRL:
             # image_feature: tensor(link_num, emb_dim)
             # batch[3]: tensor(bs, 9)
             image_feature_tmp = image_feature[batch[3], :].transpose(1, 2).view(bs, -1, 3, 3)
-            inputs = torch.cat((inputs, image_feature_tmp), dim=1)
+            inputs = torch.cat((batch[0], image_feature_tmp), dim=1)
         else:
-            inputs = torch.cat((inputs, image_feature_tmp), dim=2)
+            inputs = torch.cat((batch[0], image_feature), dim=2)
 
         batch[0] = inputs
         return batch
@@ -303,11 +303,32 @@ class AIRL:
         if self.use_encoder:
             self.encoder.eval()
 
+# test
+if __name__ == "__main__":
+    import configparser
+    from learning.generator import *
+    from learning.discriminator import *
+    from learning.encoder import *
+    from learning.w_encoder import *
+
+    CONFIG = "/Users/dogawa/PycharmProjects/GANs/config/config_test.ini"
+    config = configparser.ConfigParser()
+    config.read(CONFIG, encoding="utf-8")
+    read_general = config["GENERAL"]
+
+    model_type = "cnn"  # cnn or gnn
+    device = "mps"
+    node_path = '/Users/dogawa/Desktop/bus/estimation/data/node.csv'
+    link_path = '/Users/dogawa/Desktop/bus/estimation/data/link.csv'
+    link_prop_path = '/Users/dogawa/Desktop/bus/estimation/data/link_attr_min.csv'
+    model_dir = "/Users/dogawa/PycharmProjects/GANs/trained_models/test"
+    bs = 10
+
+    nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
 
 
-        
-
-
+    airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=None, encoder=None, h_dim=10, emb_dim=10, f0=None,
+                 hinge_loss=False, hinge_thresh=0.5, device="cpu")
 
 
 

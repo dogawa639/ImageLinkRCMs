@@ -46,6 +46,7 @@ class Node:
 
 
 class Edge:
+    base_prop = ["length", "angle"]
     def __init__(self, id, start, end):
         self.id = id
         self.start = start
@@ -77,7 +78,6 @@ class Edge:
         action_edge_ids = [[edge.id for edge in edges] for edges in self.action_edges]
         mask = np.array([d_edge in edge_ids for edge_ids in action_edge_ids])
         return mask
-
 
     @staticmethod
     def get_length(start, end):
@@ -149,7 +149,7 @@ class NetworkBase:
         self._set_shortest_path_all()
 
         self.node_props = []
-        self.link_props = []
+        self.link_props = Edge.base_prop
 
         self.sc_node = StandardScaler()
         self.sc_link = StandardScaler()
@@ -227,6 +227,7 @@ class NetworkBase:
 
     def get_sc_params_node(self):
         return self.sc_node.mean_, self.sc_node.scale_
+
     def get_sc_params_link(self):
         return self.sc_link.mean_, self.sc_link.scale_
 

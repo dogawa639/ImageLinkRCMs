@@ -43,7 +43,7 @@ class CNN3x3(nn.Module):
             self.layer_norms = nn.ModuleList([SLN(w_dim, (channels[i], *self.patch_size)) for i in range(len(channels))])
 
         # layer_norm->conv->softplus->...
-        self.sequence1 = nn.Sequential(*itertools.chain(*zip(self.layer_norms[:-1], self.covs, [Softplus()] * (len(channels)-1))))
+        self.sequence1 = nn.Sequential(*itertools.chain(*zip(self.layer_norms[:-1], self.covs, [Softplus()] * (len(channels) - 1))))
         self.sequence2 = nn.Sequential(self.layer_norms[-1], self.fc1, Softplus())
 
     def forward(self, x, w=None):
@@ -61,6 +61,7 @@ class CNN3x3(nn.Module):
             return self.act_fn(self.fc2(torch.cat([y, x], dim=1)))
         else:
             return self.act_fn(self.fc2(y))
+
 
 class CNN1x1(nn.Module):
     def __init__(self, patch_size, channels, act_fn=lambda x : x, sn=False, sln=False, w_dim=None):

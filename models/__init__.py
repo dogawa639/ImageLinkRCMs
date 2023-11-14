@@ -1,1 +1,1 @@
-__all__ = ["cnn", "deeplabv3", "gnn", "general"]
+__all__ = ["cnn", "deeplabv3", "gnn", "general", "transformer"]

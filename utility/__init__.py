@@ -1,4 +1,5 @@
 import json
+import pickle
 
 import numpy as np
 
@@ -9,7 +10,7 @@ import pyproj
 
 from PIL import Image
 
-__all__ = ["load_json", "dump_json", "Coord", "MapSegmentation"]
+__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "Coord", "MapSegmentation"]
 
 
 def load_json(file):
@@ -21,6 +22,17 @@ def load_json(file):
 def dump_json(data, file):
     with open(file, "e") as f:
         json.dump(data, f, indent=4)
+
+
+def load_pickle(file):
+    with open(file, "rb") as f:
+        data = pickle.load(f)
+    return data
+
+
+def dump_pickle(data, file):
+    with open(file, "wb") as f:
+        pickle.dump(data, f)
 
 
 class Coord:

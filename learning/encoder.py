@@ -8,17 +8,16 @@ from models.general import FF, SLN
 
 import numpy as np
 
-# forward input(patch(c, h, width), w) -> (bs, emb_dim)
+# forward input(patch(bs, c, h, width), w) -> (bs, emb_dim)
 # w: None -> bs=1
 # w: tensor(bs, w_dim) -> bs=bs
 
 class CNNEnc(nn.Module):
-    def __init__(self, patch_size, emb_dim, adj_mat, num_source=1, sln=True, w_dim=10):
+    def __init__(self, patch_size, emb_dim, num_source=1, sln=True, w_dim=10):
         super().__init__()
 
         self.patch_size = patch_size  #(c, h, w)
         self.emb_dim = emb_dim
-        self.adj_mat = adj_mat  # tensor
         self.sln = sln
         self.w_dim = w_dim
         self.mid_dim = 1000
@@ -39,48 +38,46 @@ class CNNEnc(nn.Module):
         )
 
     def forward(self, patch, source_i=0, w=None):
-        # patch: (c, h, w)
+        # patch: (c, h, width) or (bs, c, h, width)
         # w: (bs, w_dim) or (w_dim)
-        # output: (bs, emb_dim) or (emb_dim)
-        if self.sln and w is None:
-            raise Exception("w should be specified when sln is True")
-        x = self.seq(patch)  # (1000)
+        # output: (bs, emb_dim)
         if w is not None and w.dim() == 2:
             bs = w.shape[0]
-            x = x.expand(bs, *x.shape)
+            if patch.dim() == 3:
+                patch = patch.expand(bs, *patch.shape)
+        elif patch.dim() == 3:
+            patch = patch.expand(1, *patch.shape)
+
+        if self.sln and w is None:
+            raise Exception("w should be specified when sln is True")
+        x = self.seq(patch)  # (bs, 1000)
 
         if self.sln:
-            x = self.norm1(x, w)
-        else:
-            x = self.norm1(x)
+            self.norm1.set_w(w)
+            self.norm2.set_w(w)
+        x = self.norm1(x)
         x = self.lin[source_i](x)
-        if self.sln:
-            x = self.norm2(x, w)
-        else:
-            x = self.norm2(x)
+        x = self.norm2(x)
         return x
 
 
 # test
 if __name__ == "__main__":
     patch_size = (3, 256, 256)
-    emb_dim = 10
+    bs = 3
+    emb_dim = 5
     num_source = 1
-    w_dim = 3
+    w_dim = 6
     link_num = 10
     device = "mps"
-    inputs = torch.randn(10, patch_size[0], patch_size[1], patch_size[2]).to(device)
-    adj_mat = torch.randint(low=0, high=2, size=(10, 10)).to(device)
-    w = torch.randn(10, w_dim).to(device)
+    inputs = torch.randn(*patch_size).to(device)
+    w = torch.randn(bs, w_dim).to(device)
 
-    cnn = CNNEnc(patch_size, emb_dim=emb_dim, adj_mat=adj_mat, num_source=num_source, w_dim=w_dim).to(device)
+    cnn = CNNEnc(patch_size, emb_dim=emb_dim, num_source=num_source, w_dim=w_dim).to(device)
 
     out = cnn(inputs, source_i=0, w=w)
     print(out.shape)
 
-    features = torch.randn(10, link_num, emb_dim).to(device)
-    out_feature = cnn.encode(features)
-    print(out_feature.shape)
 
 
 
