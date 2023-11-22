@@ -15,8 +15,9 @@ from scipy.sparse import csgraph
 from sklearn.preprocessing import StandardScaler
 
 from utility import load_json, dump_json, Coord
+from preprocessing.osm_util import NX2GDF
 
-__all__ = ["NetworkCNN", "NetworkGNN"]
+__all__ = ["Node", "Edge", "NetworkBase", "NetworkCNN", "NetworkGNN"]
 
 
 # Define a class for nodes
@@ -50,12 +51,13 @@ class Node:
 
 class Edge:
     base_prop = ["length", "angle"]
+
     def __init__(self, id, start, end):
         self.id = id
         self.start = start
         self.end = end
         self.length = self.get_length(start, end)
-        self.angle = self.get_angle(start, end)
+        self.angle = self.get_angle(start, end)  # 0-360
         if self.length == 0:
             self.e = (0, 0)
         else:
@@ -67,8 +69,7 @@ class Edge:
 
     def set_prop(self, prop):
         for k, v in prop.items():
-            if k in self.prop:
-                self.prop[k] = v
+            self.prop[k] = v
 
     def set_action_edges(self):
         # action_edges: [[edge]] 9 elements ((0,0),(0,1),(0,2),(1,0),(1,1),(1,2),(2,0),(2,1),(2,2))
@@ -80,6 +81,7 @@ class Edge:
 
     def get_action_edges_mask(self):
         return np.array([len(edges) > 0 for edges in self.action_edges])
+
     def get_d_edge_mask(self, d_edge):
         if type(d_edge) != int:  # d_edge: edge obj
             d_edge = d_edge.id
@@ -136,13 +138,25 @@ class Edge:
     def center(self):
         return (self.start.x + self.end.x) / 2.0, (self.start.y + self.end.y) / 2.0
 
+    @property
+    def center_lonlat(self):
+        return Node.coord.from_utm(*self.center)
+
 
 # Define a class for networks
 # abstract class
 class NetworkBase:
-    def __init__(self, node_path, link_path, node_prop_path=None, link_prop_path=None):
-        self.node = pd.read_csv(node_path)  # columns=['id', 'lon', 'lat']，行番号がnodeのインデックス
-        self.link = pd.read_csv(link_path)  # columns=['id', 'start', 'end']，行番号がlinkのインデックス
+    def __init__(self, node=None, link=None, node_prop_path=None, link_prop_path=None, utm_num=4, nw_data=None):
+        if nw_data is None and (node is None or link is None):
+            raise Exception("nw_data or node and link should be set.")
+        self.utm_num = utm_num
+        Node.utm_num = utm_num
+        Node.coord = Coord(utm_num)
+
+        if type(node) == str:
+            self.node = pd.read_csv(node)  # columns=['id', 'lon', 'lat']，行番号がnodeのインデックス
+        if type(link) == str:
+            self.link = pd.read_csv(link)  # columns=['id', 'start', 'end']，行番号がlinkのインデックス
 
         self._trim_duplicate()  # remove duplicated link
         self._trim_nodes()  # remove nodes not used
@@ -163,9 +177,15 @@ class NetworkBase:
         self.sc_link = StandardScaler()
 
         if node_prop_path is not None:
-            self.set_node_prop(node_prop_path=node_prop_path)
+            if type(node_prop_path) == str:
+                self.set_node_prop(node_prop_path=node_prop_path)
+            else:
+                self.set_node_prop(node_prop=node_prop_path)
         if link_prop_path is not None:
-            self.set_link_prop(link_prop_path=link_prop_path)
+            if type(link_prop_path) == str:
+                self.set_link_prop(link_prop_path=link_prop_path)
+            else:
+                self.set_link_prop(link_prop=link_prop_path)
 
     def set_node_prop(self, node_prop=None, node_prop_path=None):
         if node_prop_path is not None:
@@ -251,7 +271,7 @@ class NetworkBase:
         width, headwidth, headlength = 0.002, 2, 2.5
         if ax is None:
             fig, ax = plt.subplots()
-            plt.set_aspect('equal')
+            ax.set_aspect('equal')
         if colors is None:
             colors = ["black" for _ in link_ids]
         else:
@@ -262,6 +282,10 @@ class NetworkBase:
             sm = plt.cm.ScalarMappable(cmap=cm, norm=norm)
             plt.colorbar(sm, ax=ax)
 
+        xs = []
+        ys = []
+        us = []
+        vs = []
         for i, lid in enumerate(link_ids):
             edge = self.edges[lid]
             dx, dy = 0, 0
@@ -269,7 +293,11 @@ class NetworkBase:
                 dx, dy = edge.n
                 dx *= 2
                 dy *= 2
-            ax.quiver([edge.start.x + dx, edge.end.x + dx], [edge.start.y + dy, edge.end.y + dy], color=colors[i], width=width, headwidth=headwidth, headlength=headlength, angles="xy", scale_units="xy", scale=1)
+            xs.append(edge.start.x + dx)
+            ys.append(edge.start.y + dy)
+            us.append(edge.end.x - edge.start.x)
+            vs.append(edge.end.y - edge.start.y)
+        ax.quiver(xs, ys, us, vs, color=colors, width=width, headwidth=headwidth, headlength=headlength, angles="xy", scale_units="xy", scale=1)
         return ax
 
     # functions for inside processing
@@ -362,6 +390,28 @@ class NetworkBase:
         if dx < 0:
             arctan += 180.0
         return arctan % 360
+
+    @staticmethod
+    def crop(nw_data, polygon_coord, utm_num):
+        # polygon_coord: [(lon, lat)]
+        # utm_num: 平面直交座標系番号
+        # return: cropped network
+        coord = Coord(utm_num)
+        polygon_coord_xy = [coord.to_utm(lon, lat) for lon, lat in polygon_coord]
+        polygon = shapely.geometry.Polygon(polygon_coord_xy)
+        # link: [id, start, end]
+        # node: [id, lon, lat]
+        # link_prop: [LinkID, prop1, prop2, ...]
+        nodes = [node.id for node in nw_data.nodes.values() if polygon.contains(shapely.geometry.Point(node.x, node.y))]
+        link = [edge for edge in nw_data.edges.values() if edge.start.id in nodes and edge.end.id in nodes]
+        link_prop = [[edge.id] + [edge.prop[k] if k in edge.prop else 0.0 for k in nw_data.link_props if k not in Edge.base_prop] for edge in link]
+
+        node = pd.DataFrame([[node.id, node.lon, node.lat] for node in nw_data.nodes.values() if node.id in nodes], columns=["id", "lon", "lat"])
+        link = pd.DataFrame([[edge.id, edge.start.id, edge.end.id] for edge in link], columns=["id", "start", "end"])
+        link_prop = pd.DataFrame(link_prop, columns=["LinkID"] + [k for k in nw_data.link_props if k not in Edge.base_prop])
+
+        new_nw_data = NetworkBase(node, link, link_prop_path=link_prop)
+        return new_nw_data
     
     @staticmethod
     def get_from_osm(polygon_coord, utm_num, node_path, link_path, link_prop_path=None):
@@ -369,11 +419,44 @@ class NetworkBase:
         # poligon_coord: [(lon, lat)]
         # utm_num: 平面直交座標系番号
         # node_path: nodeのcsvファイルのパス [id, lon, lat]
-        # link_path: linkのcsvファイルのパス [id, start, end]
+        # link_path: linkのcsvファイルのパス [id, start, end(, start_lon, start_lat, end_lon, end_lat)]
         # return: node, link
-        
+        epsg = 6668 + utm_num
         bounding_box = shapely.geometry.Polygon(polygon_coord)
         drive_net = ox.graph.graph_from_polygon(bounding_box, simplify=True, retain_all=False, network_type='drive')
+
+        gdfs = NX2GDF(drive_net)
+        _, edge_gdf = gdfs.to_epsg(epsg)
+        edge_gdf["geometry"] = edge_gdf["geometry"].simplify(5).to_crs(epsg=4326)
+        edge_gdf["id"] = np.arange(len(edge_gdf)) + 1
+
+        node_set = set(sum([[*geom.coords] for geom in edge_gdf["geometry"]], []))
+        nid2coord = {i+1: node for i, node in enumerate(node_set)}
+        coord2nid = {v: k for k, v in nid2coord.items()}
+        edge_gdf["start"] = edge_gdf["geometry"].apply(lambda x: coord2nid[x.coords[0]])
+        edge_gdf["end"] = edge_gdf["geometry"].apply(lambda x: coord2nid[x.coords[-1]])
+
+        node_df = pd.DataFrame({"id": list(nid2coord.keys()),
+                                "lon": [coord[0] for coord in nid2coord.values()],
+                                "lat": [coord[1] for coord in nid2coord.values()]})
+        node_df["id"] = node_df["id"].astype(int)
+
+        link_df = edge_gdf[["id", "start", "end"]]
+        link_df = link_df.astype(int)
+        link_df["start_lon"] = link_df["start"].apply(lambda x: nid2coord[x][0])
+        link_df["start_lat"] = link_df["start"].apply(lambda x: nid2coord[x][1])
+        link_df["end_lon"] = link_df["end"].apply(lambda x: nid2coord[x][0])
+        link_df["end_lat"] = link_df["end"].apply(lambda x: nid2coord[x][1])
+
+        node_df.to_csv(node_path, index=False)
+        link_df.to_csv(link_path, index=False)
+
+        if link_prop_path is not None:
+            cols = [col for col in edge_gdf.columns if not col in ["id", "start", "end", "u", "v",  "key", "osmid", "geometry"]]
+            edge_prop = edge_gdf[["id"] + cols]
+            edge_prop.columns = ["LinkID"] + cols
+
+            edge_prop.to_csv(link_prop_path, index=False)
 
     @property
     def feature_num(self):
@@ -383,12 +466,11 @@ class NetworkBase:
     def link_num(self):
         return len(self.lids)
 
+
 class NetworkCNN(NetworkBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._set_action_edges()  # add action edges to each edge
-
-        self.sc_link = StandardScaler()
 
     def get_feature_matrix(self, lid, normalize=False):
         # feature_num*3*3 matrix: center element represents the lid
@@ -472,6 +554,7 @@ class NetworkCNN(NetworkBase):
         if normalize:
             all_features = self.sc_link.transform(all_features)
         return all_features
+
     def set_link_prop(self, **kwargs):
         super().set_link_prop(**kwargs)
 
@@ -504,8 +587,6 @@ class NetworkGNN(NetworkBase):
         super().__init__(*args, **kwargs)
         self.k = k
         self._set_laplacian_matrix()
-
-        self.sc_link = StandardScaler()
 
     def get_feature_matrix(self, normalize=False):
         # feature of all edges (link_num, feature_num)
@@ -552,3 +633,34 @@ class NetworkGNN(NetworkBase):
         self.renorm_laplacian_matrix = d_plus_inv_half * a_plus * d_plus_inv_half  # (I+D)^-0.5 * (I+A) * (I+D)^-0.5
         renorm_eig_val, self.renorm_eig_vec = sparse.linalg.eigs(self.renorm_laplacian_matrix, k=self.k, which="SR", tol=0)
         self.renorm_eig_vec = self.renorm_eig_vec[:, renorm_eig_val.argsort()]  # ndarray (link_num, k)
+
+
+# test
+if __name__ == "__main__":
+    # node_path = "data/test/node.csv"
+    # link_path = "data/test/link.csv"
+    # link_prop_path = "data/test/link_prop.csv"
+    # polygon_coord = [(139.700, 35.650), (139.700, 35.700), (139.800, 35.700), (139.800, 35.650)]
+
+    import json
+    import configparser
+    from preprocessing.network_processing import *
+
+    node_path = "../data/test/node.csv"
+    link_path = "../data/test/link.csv"
+    link_prop_path = "../data/test/link_prop.csv"
+
+    #NetworkBase.get_from_osm([(132.75,33.99),(132.70,33.99),(132.70,33.90),(132.75,33.90)], 4,
+    #                         node_path, link_path, link_prop_path)
+
+    CONFIG = "/Users/dogawa/PycharmProjects/GANs/config/config_test.ini"
+    config = configparser.ConfigParser()
+    config.read(CONFIG, encoding="utf-8")
+
+    read_data = config["DATA"]
+    node_path = read_data["node_path"]
+    link_path = read_data["link_path"]
+
+    nw_data = NetworkBase(node_path, link_path)
+    ax = nw_data.plot_link(nw_data.lids)
+    plt.show()

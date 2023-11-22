@@ -54,7 +54,7 @@ class AIRL:
     
     def train(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
               train_ratio=0.8, d_epoch=5, lr_f0=0.01, lr_e=0.01, image_file=None):
-        logger = Logger(os.path.join(self.model_dir, "log.json"), conf_file)  #loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,criteria
+        log = Logger(os.path.join(self.model_dir, "log.json"), conf_file)  #loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,criteria
 
         optimizer_g = optim.Adam(self.generator.parameters(), lr=lr_g)
         optimizer_d = optim.Adam(self.discriminator.parameters(), lr=lr_d)
@@ -175,13 +175,13 @@ class AIRL:
                 self.generator.save(self.model_dir)
                 self.discriminator.save(self.model_dir)
 
-            logger.add_log("loss_e", epoch_loss_e)
-            logger.add_log("loss_g", epoch_loss_g)
-            logger.add_log("loss_d", epoch_loss_d)
-            logger.add_log("loss_e_val", epoch_loss_e_val)
-            logger.add_log("loss_g_val", epoch_loss_g_val)
-            logger.add_log("loss_d_val", epoch_loss_d_val)
-            logger.add_log("criteria", criteria)
+            log.add_log("loss_e", epoch_loss_e)
+            log.add_log("loss_g", epoch_loss_g)
+            log.add_log("loss_d", epoch_loss_d)
+            log.add_log("loss_e_val", epoch_loss_e_val)
+            log.add_log("loss_g_val", epoch_loss_g_val)
+            log.add_log("loss_d_val", epoch_loss_d_val)
+            log.add_log("criteria", criteria)
 
             t2 = time.perf_counter()
             print("epoch: {}, loss_e_val: {:.4f}, loss_g_val: {:.4f}, loss_d_val: {:.4f}, criteria: {:.4f}, time: {:.4f}".format(
@@ -193,12 +193,12 @@ class AIRL:
             ax2 = fig.add_subplot(312)
             ax3 = fig.add_subplot(313)
 
-            loss_g = np.array(logger.data["loss_g"])
-            loss_d = np.array(logger.data["loss_d"])
+            loss_g = np.array(log.data["loss_g"])
+            loss_d = np.array(log.data["loss_d"])
             for i in range(loss_g.shape[1]):
                 ax1.plot(loss_g[:, i], label="mode {}".format(i))
                 ax2.plot(loss_d[:, i], label="mode {}".format(i))
-            ax3.plot(logger.data["criteria"])
+            ax3.plot(log.data["criteria"])
 
             ax1.set_xlabel("epoch")
             ax2.set_xlabel("epoch")
@@ -211,6 +211,7 @@ class AIRL:
 
             plt.savefig(image_file)
             plt.close()
+        log.close()
 
     def loss(self, raw_data_fake, d_real, d_fake, hinge_loss=False):
         # raw_data_fake, d_fake: same shape, tensor
@@ -310,6 +311,7 @@ if __name__ == "__main__":
     from learning.discriminator import *
     from learning.encoder import *
     from learning.w_encoder import *
+    from preprocessing.network_processing import NetworkCNN
 
     CONFIG = "/Users/dogawa/PycharmProjects/GANs/config/config_test.ini"
     config = configparser.ConfigParser()

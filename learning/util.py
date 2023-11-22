@@ -3,10 +3,11 @@ from learning.generator import *
 from learning.encoder import *
 from learning.w_encoder import *
 
-def get_models(model_names, nw_data, output_channel, emb_dim, in_emb_dim, drop_out, sn, sln, w_dim,
+def get_models(model_names, nw_data, output_channel, emb_dim, in_emb_dim, drop_out, sn, sln, h_dim, w_dim,
                num_head=3, depth=6, gamma=0.9, max_num=40, ext_coeff=1.0):
     # model_names: list of str
 
+    # FNW(self, h_dim, w_dim)
     # CNNDis(self, nw_data, output_channel, gamma=0.9, max_num=40, sln=True, w_dim=10, ext_coeff=1.0)
     # GNNDis(self, nw_data, emb_dim, output_channel, gamma=0.9, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, sn=False, sln=False, w_dim=None, ext_coeff=1.0)
     # CNNGen(self, nw_data, output_channel, max_num=40, sln=True, w_dim=10)
@@ -17,7 +18,9 @@ def get_models(model_names, nw_data, output_channel, emb_dim, in_emb_dim, drop_o
 
     models = []
     for model_name in model_names:
-        if model_name == "CNNDis":
+        if model_name == "FNW":
+            models.append(FF(h_dim, w_dim), bias=True, sn=False)
+        elif model_name == "CNNDis":
             models.append(CNNDis(nw_data, output_channel, gamma=gamma, max_num=max_num, sn=True, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))
         elif model_name == "GNNDis":
             models.append(GNNDis(nw_data, emb_dim, output_channel, gamma=gamma, in_emb_dim=in_emb_dim, num_head=num_head, dropout=drop_out, depth=depth, sn=sn, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))

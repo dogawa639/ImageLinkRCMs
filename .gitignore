@@ -3,6 +3,7 @@
 *.pth
 *.npy
 *.png
+data/test
 /trained_models
 
 # configs
@@ -13,3 +14,4 @@
 
 # test
 test.json
+/debug

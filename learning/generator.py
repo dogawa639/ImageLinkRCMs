@@ -35,6 +35,7 @@ class CNNGen(nn.Module):
         # num: int or list(self.output_channel elements)
         # fake_data: [{pid: {d_node: d_node, path: [link]}}]
         # w : (sum(num), w_dim)
+        # d_node is specified in context feature
         if type(num) == int:
             num = [num for _ in range(self.output_channel)]
         if len(num) != self.output_channel:

@@ -34,11 +34,11 @@ class FF(nn.Module):
         self.act_fn = act_fn
 
         if sn:
-            self.ff1 = spectral_norm(nn.Linear(input_channel, hidden_channel, bias=bias))
-            self.ff2 = spectral_norm(nn.Linear(hidden_channel, output_channel, bias=bias))
+            self.ff1 = spectral_norm(nn.Linear(input_channel, self.hidden_channel, bias=bias))
+            self.ff2 = spectral_norm(nn.Linear(self.hidden_channel, output_channel, bias=bias))
         else:
-            self.ff1 = nn.Linear(input_channel, hidden_channel, bias=bias)
-            self.ff2 = nn.Linear(hidden_channel, output_channel, bias=bias)
+            self.ff1 = nn.Linear(input_channel, self.hidden_channel, bias=bias)
+            self.ff2 = nn.Linear(self.hidden_channel, output_channel, bias=bias)
 
         self.seq = nn.Sequential(
             self.ff1,

@@ -10,7 +10,7 @@ import pyproj
 
 from PIL import Image
 
-__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "Coord", "MapSegmentation"]
+__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "Coord", "MapSegmentation"]
 
 
 def load_json(file):
@@ -20,7 +20,7 @@ def load_json(file):
 
 
 def dump_json(data, file):
-    with open(file, "e") as f:
+    with open(file, "w") as f:
         json.dump(data, f, indent=4)
 
 
@@ -34,6 +34,56 @@ def dump_pickle(data, file):
     with open(file, "wb") as f:
         pickle.dump(data, f)
 
+
+def heron(a, b, c):
+    # a, b, c: length of triangle
+    s = (a + b + c) / 2
+    return np.sqrt(s * (s - a) * (s - b) * (s - c))
+
+
+def heron_vertex(v1, v2, v3):
+    # v1, v2, v3: (x, y)
+    a = np.sqrt((v1[0] - v2[0])**2 + (v1[1] - v2[1])**2)
+    b = np.sqrt((v2[0] - v3[0])**2 + (v2[1] - v3[1])**2)
+    c = np.sqrt((v3[0] - v1[0])**2 + (v3[1] - v1[1])**2)
+    return heron(a, b, c)
+
+
+def write_2d_ndarray(file, array):
+    if type(array) != np.ndarray:
+        raise Exception("array should be numpy.ndarray")
+    if len(array.shape) != 2:
+        raise Exception("array should be 2d")
+    with open(file, "w") as f:
+        for i in range(array.shape[0]):
+            for j in range(array.shape[1]):
+                f.write(str(array[i,j]) + " ")
+            f.write("\n")
+
+
+def write_1d_array(file, array):
+    if len(array.shape) != 1:
+        raise Exception("array should be 1d")
+    with open(file, "w") as f:
+        for i in range(array.shape[0]):
+            f.write(str(array[i]) + " ")
+        f.write("\n")
+
+
+def load_2d_ndarray(file):
+    with open(file) as f:
+        lines = f.readlines()
+    array = np.zeros((len(lines), len(lines[0].split())))
+    for i, line in enumerate(lines):
+        array[i,:] = np.array([float(x) for x in line.split()])
+    return array
+
+
+def load_1d_array(file):
+    with open(file) as f:
+        line = f.readline()
+    array = np.array([float(x) for x in line.split()])
+    return array
 
 class Coord:
     # 座標変換用
@@ -50,8 +100,8 @@ class Coord:
         return (utm_point.x, utm_point.y)
 
     def from_utm(self, x, y):
-        lon, lat = transform(self.project_from_utm, Point(x, y))
-        return (lon, lat)
+        wgs_point = transform(self.project_from_utm, Point(x, y))
+        return (wgs_point.x, wgs_point.y)
     
 
 class MapSegmentation:
