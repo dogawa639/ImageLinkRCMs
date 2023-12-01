@@ -13,14 +13,13 @@ class GATBlock(nn.Module):
     # input: (*, node_num, emb_dim), adj_matrix: (node_num, node_num)
     # output: (*, node_num, emb_dim)
     def __init__(self, emb_dim, adj_matrix, 
-                 in_emb_dim=None, num_head=1, dropout=0.0, sn=False, output_atten=False, atten_fn="matmul"):
+                 in_emb_dim=None, num_head=1, dropout=0.0, sn=False, atten_fn="matmul"):
         super().__init__()
-        self.output_atten = output_atten
         kwargs = {
             "in_emb_dim": in_emb_dim, 
             "num_head": num_head, 
             "dropout": dropout, 
-            "output_atten": output_atten, 
+            "output_atten": True,
             "sn": sn, 
             "atten_fn": atten_fn
             }
@@ -31,9 +30,7 @@ class GATBlock(nn.Module):
         # x: (*, node_num, emb_dim)
         n = x.shape[-2]
         y = self.attention(x, self.adj_matrix.expand(*x.shape[:-2], n, n))
-        if self.output_atten:
-            return x + y[0], y[1]
-        return x + y
+        return x + y[0], y[1]
 
 
 class GAT(nn.Module):
@@ -57,8 +54,7 @@ class GAT(nn.Module):
         kwargs = {
             "in_emb_dim": in_emb_dim, 
             "num_head": num_head, 
-            "dropout": dropout, 
-            "output_atten": output_atten, 
+            "dropout": dropout,
             "sn": sn, 
             "atten_fn": 
             atten_fn
@@ -83,7 +79,9 @@ class GAT(nn.Module):
                 atten = atten_agg
             else:
                 atten = torch.matmul(atten_agg, atten)
-        return x, atten
+        if self.output_atten:
+            return x, atten
+        return x
     
 
 # https://arxiv.org/abs/2012.09699
@@ -91,7 +89,7 @@ class GT(nn.Module):
     # input: (bs, node_num, emb_dim_in) or (node_num, emb_dim_in), pos_encoding: (node_num, enc_dim)
     # output: (bs, node_num, emb_dim_out) or (node_num, emb_dim_out)
     def __init__(self, emb_dim_in, emb_dim_out, adj_matrix, 
-                 enc_dim=3, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False):
+                 enc_dim=3, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False, atten_fn="matmul"):
         # k: number of heads
         super().__init__()
         self.emb_dim_in = emb_dim_in
@@ -114,7 +112,8 @@ class GT(nn.Module):
             "output_atten": output_atten, 
             "sn": sn,
             "sln": sln, 
-            "w_dim": w_dim
+            "w_dim": w_dim,
+            "atten_fn": atten_fn
             }
         self.transformer = TransformerEncoder(emb_dim_out, **kwargs)
 

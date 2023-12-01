@@ -11,7 +11,7 @@ import numpy as np
 
 class CNNDis(nn.Module):
     def __init__(self, nw_data, output_channel, 
-                 gamma=0.9, max_num=40, sln=True, w_dim=10, ext_coeff=1.0):
+                 gamma=0.9, max_num=40, sn=True, sln=True, w_dim=10, ext_coeff=1.0):
         super().__init__()
         self.nw_data = nw_data
         self.output_channel = output_channel
@@ -23,13 +23,13 @@ class CNNDis(nn.Module):
         self.context_num = self.nw_data.context_feature_num
         self.total_feature = self.feature_num + self.context_num
 
-        self.util = CNN3x3((3, 3), (self.total_feature, self.total_feature*2, output_channel), act_fn=lambda x : -softplus(x), residual=True, sn=True, sln=sln, w_dim=w_dim)
+        self.util = CNN3x3((3, 3), (self.total_feature, self.total_feature*2, output_channel), act_fn=lambda x : -softplus(x), residual=True, sn=sn, sln=sln, w_dim=w_dim)
 
-        self.ext = CNN3x3((3, 3), (self.feature_num+output_channel, (self.feature_num+output_channel)*2, output_channel), act_fn=lambda x : -softplus(x), residual=True, sn=True, sln=sln, w_dim=w_dim)
+        self.ext = CNN3x3((3, 3), (self.feature_num+output_channel, (self.feature_num+output_channel)*2, output_channel), act_fn=lambda x : -softplus(x), residual=True, sn=sn, sln=sln, w_dim=w_dim)
 
-        self.val = CNN1x1((3, 3), (self.total_feature, self.total_feature*2, output_channel), act_fn=lambda x : -softplus(x), sn=True, sln=sln, w_dim=w_dim)
+        self.val = CNN1x1((3, 3), (self.total_feature, self.total_feature*2, output_channel), act_fn=lambda x : -softplus(x), sn=sn, sln=sln, w_dim=w_dim)
 
-        self.w = w
+        self.w = None
 
     def forward(self, input, pi, w=None, i=None):
         # input: (sum(links), total_feature, 3, 3)

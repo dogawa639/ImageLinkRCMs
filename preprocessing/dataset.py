@@ -23,21 +23,21 @@ import os
 from utility import MapSegmentation
 from preprocessing.pp_processing import PP
 
-__all__ = ["GridDataset", "PPEmbedDataset", "ImageDataset", "calc_loss"]
+__all__ = ["GridDataset", "PPEmbedDataset", "PatchDataset", "ImageDataset", "calc_loss"]
 
 
 class GridDataset(Dataset):
     # 3*3 grid choice set
-    def __init__(self, pp_data, nw_data, h_dim=10, normalize=True):
+    def __init__(self, pp_data, h_dim=10, normalize=True):
         # nw_data: NWDataCNN
         self.pp_data = pp_data
-        self.nw_data = nw_data
+        self.nw_data = pp_data.nw_data
         self.h_dim = h_dim
 
-        lid2idx = {lid: i for i, lid in enumerate(nw_data.lids)}
+        lid2idx = {lid: i for i, lid in enumerate(self.nw_data.lids)}
 
-        f = nw_data.feature_num
-        c = nw_data.context_feature_num
+        f = self.nw_data.feature_num
+        c = self.nw_data.context_feature_num
         # inputs: [sum(sample_num), f+c, 3, 3]
         # masks: [sum(sample_num), 9]
         # next_links: [sum(sample_num), 9]
@@ -60,8 +60,8 @@ class GridDataset(Dataset):
             for i in range(sample_num):
                 tmp_link = path[i]
                 next_link = path[i+1]
-                feature_mat, _ = nw_data.get_feature_matrix(tmp_link, normalize=normalize)
-                context_mat, action_edge = nw_data.get_context_matrix(tmp_link, d_node_id, normalize=normalize)
+                feature_mat, _ = self.nw_data.get_feature_matrix(tmp_link, normalize=normalize)
+                context_mat, action_edge = self.nw_data.get_context_matrix(tmp_link, d_node_id, normalize=normalize)
 
                 trip_input[i, 0:f, :, :] = feature_mat
                 trip_input[i, f:f+c, :, :] = context_mat
@@ -76,13 +76,13 @@ class GridDataset(Dataset):
             masks = np.concatenate((masks, trip_mask), axis=0)
             next_links = np.concatenate((next_links, trip_next_link), axis=0)
             link_idxs = np.concatenate((link_idxs, trip_link_idxs), axis=0)
-            hs = np.concatenate((hs, np.repeat(np.random.randn(1, h_dim), len(trip_input), axis=0)), axis=0)
+            hs = np.concatenate((hs, np.repeat(np.random.randn(1, h_dim), len(trip_input), axis=0)), axis=0).astype(np.float32)
 
-        self.inputs = tensor(inputs, retain_grad=False)
-        self.masks = tensor(masks, retain_grad=False)
-        self.next_links = tensor(next_links, retain_grad=False)
-        self.link_idxs = tensor(link_idxs, retain_grad=False)
-        self.hs = tensor(hs, retain_grad=False)
+        self.inputs = tensor(inputs, requires_grad=False)
+        self.masks = tensor(masks, requires_grad=False)
+        self.next_links = tensor(next_links, requires_grad=False)
+        self.link_idxs = tensor(link_idxs, requires_grad=False)
+        self.hs = tensor(hs, requires_grad=False)
 
     def __len__(self):
         return len(self.inputs)
@@ -94,7 +94,7 @@ class GridDataset(Dataset):
     def split_into(self, ratio):
         # ratio: [train, test, validation]
         pp_data = self.pp_data.split_into(ratio)
-        return [GridDataset(pp_data[i], self.nw_data) for i in range(len(ratio))]
+        return [GridDataset(pp_data[i], self.h_dim) for i in range(len(ratio))]
 
     def get_fake_batch(self, real_batch, g_output):
         mask = real_batch[1]
@@ -108,11 +108,11 @@ class GridDataset(Dataset):
 class PPEmbedDataset(Dataset):
     # nw_data: NWDataGNN
     # Global state (link_num, graph_node_feature_num) + PP pos embedding, PP adj matrix (link_num, link_num)
-    def __init__(self, pp_data, nw_data, h_dim=10):
+    def __init__(self, pp_data, h_dim=10):
         # global state: output of GNN
         self.pp_data = pp_data
-        self.nw_data = nw_data
-        self.feature_mat = nw_data.get_feature_matrix()
+        self.nw_data = pp_data.nw_data
+        self.feature_mat = self.nw_data.get_feature_matrix()
         self.link_num, self.feature_num = self.feature_mat.shape
 
         self.pp_pos_embeddings = [self.get_pp_pos_embedding(path) for path in pp_data.load_edge_list()]
@@ -212,6 +212,18 @@ class PPEmbedDataset(Dataset):
         next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()  # (trip_num * link_num)
         next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
         return real_batch[0], real_batch[1], next_links_one_hot, real_batch[3]
+
+
+class PatchDataset(Dataset):
+    def __init__(self, patches):
+        # patches: [(C, H, W)]
+        self.patches = patches
+
+    def __getitem__(self, item):
+        return tensor(self.patches[item], dtype=torch.float32)
+
+    def __len__(self):
+        return len(self.patches)
 
 
 class ImageDataset(Dataset):

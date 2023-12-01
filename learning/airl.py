@@ -14,13 +14,14 @@ import time
 import os
 
 from utility import *
+from preprocessing.dataset import PatchDataset
 from models.general import log
 from logger import Logger
 
 
 class AIRL:
     def __init__(self, generator, discriminator, use_index, datasets, model_dir, image_data=None, encoder=None, h_dim=10, emb_dim=10, f0=None,
-                 hinge_loss=False, hinge_thresh=0.5, device="cpu"):
+                 hinge_loss=False, hinge_thresh=0.5, patch_size=256, device="cpu"):
         if hinge_thresh > 1.0 or hinge_thresh < 0.0:
             raise ValueError("hinge_thresh must be in [0, 1].")
         if encoder is not None and image_data is None:
@@ -29,7 +30,7 @@ class AIRL:
         self.generator = generator.to(device)
         self.discriminator = discriminator.to(device)
         self.use_index = use_index  # whether inputs are the local link feature or not
-        self.datasets = datasets  # list of Dataset  train&validation
+        self.datasets = datasets  # list of Dataset  [train+test]
         self.model_dir = model_dir
         self.use_encoder = encoder is not None
         self.encoder = encoder
@@ -40,6 +41,7 @@ class AIRL:
         self.image_data = image_data
         self.hinge_loss = hinge_loss
         self.hinge_thresh = -log(tensor(hinge_thresh, dtype=torch.float32, device=device, requires_grad=False))
+        self.patch_size = patch_size
         self.device = device
 
         self.sln = self.use_w
@@ -51,8 +53,11 @@ class AIRL:
             self.encoder = self.encoder.to(device)
         if self.use_w:
             self.f0 = self.f0.to(device)
+        if image_data is not None:
+            self.image_data.set_voronoi(self.datasets[0].nw_data)
+            self.image_data.compress_patches(self.encoder, patch_size, device=device)
     
-    def train(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
+    def train_models(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
               train_ratio=0.8, d_epoch=5, lr_f0=0.01, lr_e=0.01, image_file=None):
         log = Logger(os.path.join(self.model_dir, "log.json"), conf_file)  #loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,criteria
 
@@ -91,7 +96,8 @@ class AIRL:
                     # raw_data retain_grad=True
                     # Grid: (sum(links), 3, 3) corresponds to next_links
                     # Emb: (trip_num, link_num, link_num) sparse, corresponds to transition_matrix
-                    bs = batch_real.shape[0]
+                    batch_real = [tensor(tmp, dtype=torch.float32, device=self.device) for tmp in batch_real]
+                    bs = batch_real[0].shape[0]
                     w = None
                     if self.use_w:
                         w = self.f0(batch_real[-1])  # (bs, w_dim)
@@ -101,9 +107,9 @@ class AIRL:
                         batch_real = self.cat_image_feature(batch_real, w=w)
 
                     if self.sln:
-                        raw_data_fake = self.generator(batch_real[0], i, w)  # batch_fake retain_grad=False
+                        raw_data_fake = self.generator(batch_real[0], i, w)  # batch_fake requires_grad=False
                     else:
-                        raw_data_fake = self.generator(batch_real[0], i)  # batch_fake retain_grad=False
+                        raw_data_fake = self.generator(batch_real[0], i)  # batch_fake requires_grad=False
                     batch_fake = self.datasets.get_fake_batch(batch_real, raw_data_fake)
 
                     for j in range(len(batch_real)):
@@ -125,7 +131,7 @@ class AIRL:
                         mode_loss_d.append(loss_d.clone().detach().cpu().item())
 
                         if j == 0:
-                            # f0 and encoder updata
+                            # f0 and encoder update
                             if self.use_w:
                                 optimizer_0.zero_grad()
                             if self.use_encoder:
@@ -153,6 +159,7 @@ class AIRL:
 
                 self.eval()
                 for batch_real in dataloader_val:
+                    batch_real = [tensor(tmp, dtype=torch.float32, device=self.device) for tmp in batch_real]
                     raw_data_fake, batch_fake = self.generator.generate(batch_size, i)
                     d_real = self.get_d(batch_real)
                     d_fake = self.get_d(batch_fake)
@@ -252,10 +259,10 @@ class AIRL:
         # index: (bs, 9)
         bs = batch[0].shape[0]
         image_feature = tensor(np.zeros((bs, self.link_num, self.emb_dim), dtype=np.float32), device=self.device)
-        for source_i, patches in enumerate(self.image_data.load_link_patches()):
-            # patches [image_data]
-            for i, patch in enumerate(patches):
-                image_feature[:, i, :] = image_feature[:, i, :] + self.encoder(patch, w, source_i=source_i) / len(self.image_data)  # requires_grad=True (bs, link_num, emb_dim)
+        for i in range(len(self.image_data)):
+            comp_feature = self.image_data.load_compressed_patches(i)
+            comp_feature = tensor(comp_feature, dtype=torch.float32, device=self.device)
+            image_feature = image_feature + self.encoder(comp_feature, source_i=i, w=w) / len(self.image_data)   # requires_grad=True (bs, link_num, emb_dim)
 
         # inputs: (bs, c, 3, 3) or (bs, link_num, feature_num)
         if self.use_index:
@@ -304,33 +311,137 @@ class AIRL:
         if self.use_encoder:
             self.encoder.eval()
 
+
 # test
 if __name__ == "__main__":
     import configparser
+    import json
     from learning.generator import *
     from learning.discriminator import *
     from learning.encoder import *
     from learning.w_encoder import *
-    from preprocessing.network_processing import NetworkCNN
+    from learning.util import get_models
+    from preprocessing.network_processing import *
+    from preprocessing.pp_processing import *
+    from preprocessing.image_processing import *
+    from preprocessing.dataset import *
 
     CONFIG = "/Users/dogawa/PycharmProjects/GANs/config/config_test.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
+    # general
     read_general = config["GENERAL"]
+    model_type = read_general["model_type"]  # cnn or gnn
+    device = read_general["device"]
+    # data
+    read_data = config["DATA"]
+    node_path = read_data["node_path"]
+    link_path = read_data["link_path"]
+    link_prop_path = read_data["link_prop_path"]
 
-    model_type = "cnn"  # cnn or gnn
-    device = "mps"
-    node_path = '/Users/dogawa/Desktop/bus/estimation/data/node.csv'
-    link_path = '/Users/dogawa/Desktop/bus/estimation/data/link.csv'
-    link_prop_path = '/Users/dogawa/Desktop/bus/estimation/data/link_attr_min.csv'
-    model_dir = "/Users/dogawa/PycharmProjects/GANs/trained_models/test"
-    bs = 10
+    pp_path = json.loads(read_data["pp_path"])  # list(str)
+    image_data_path = read_data["image_data_path"] # str or None
+    image_data_path = None if image_data_path == "null" else image_data_path
+    # train setting
+    read_train = config["TRAIN"]
+    bs = int(read_train["bs"])  # int
+    epoch = int(read_train["epoch"])  # int
+    lr_g = float(read_train["lr_g"])  # float
+    lr_d = float(read_train["lr_d"])  # float
+    lr_f0 = float(read_train["lr_f0"])  # float
+    lr_e = float(read_train["lr_e"])  # float
+    shuffle = bool(read_train["shuffle"])  # bool
+    train_ratio = float(read_train["train_ratio"])  # float
+    d_epoch = int(read_train["d_epoch"])  # int
+    # model setting
+    read_model = config["MODELSETTING"]
+    use_f0 = bool(read_model["use_f0"])  # bool
+    emb_dim = int(read_model["emb_dim"])  # int
+    in_emb_dim = json.loads(read_model["in_emb_dim"])  # int or None
+    drop_out = float(read_model["drop_out"])  # float
+    sn = bool(read_model["sn"])  # bool
+    sln = bool(read_model["sln"])  # bool
+    h_dim = int(read_model["h_dim"])  # int
+    w_dim = int(read_model["w_dim"])  # int
+    num_head = int(read_model["num_head"])  # int
+    depth = int(read_model["depth"])  # int
+    gamma = float(read_model["gamma"])   # float
+    max_num = int(read_model["max_num"])  # int
+    ext_coeff = float(read_model["ext_coeff"])  # float
+    hinge_loss = bool(read_model["hinge_loss"])  # bool
+    hinge_thresh = json.loads(read_model["hinge_thresh"])  # float or None
+    patch_size = int(read_model["patch_size"])  # int
+    # save setting
+    read_save = config["SAVE"]
+    model_dir = read_save["model_dir"]
+    image_file = read_save["image_file"]  # str or None
+    image_file = None if image_file == "null" else image_file
 
-    nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
+    # instance creation
+    use_index = (model_type == "cnn")
+    use_encoder = (image_data_path is not None)
+    output_channel = len(pp_path)
 
+    if model_type == "cnn":
+        nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
+    else:
+        nw_data = NetworkGNN(node_path, link_path, link_prop_path=link_prop_path)
+    pp_list = [PP(ppath, nw_data) for ppath in pp_path]
+    if model_type == "cnn":
+        datasets = [GridDataset(pp, h_dim=h_dim) for pp in pp_list]
+    else:
+        datasets = [PPEmbedDataset(pp, h_dim=h_dim) for pp in pp_list]
+    image_data = None
+    num_source = 0
+    if image_data_path is not None:
+        image_data = ImageData(image_data_path)
+        num_source = len(image_data)
+    # model_names : [str] [discriminator, generator, (f0, w_encoder), (encoder)]
+    model_names = ["CNNDis", "CNNGen"] if model_type == "cnn" else ["GNNDis", "GNNGen"]
+    if use_f0:
+        model_names += ["FNW"]
+        model_names += ["CNNWEnc"] if use_encoder else ["GNNWEnc"]
+    if use_encoder:
+        model_names += ["CNNEnc"]
 
-    airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=None, encoder=None, h_dim=10, emb_dim=10, f0=None,
-                 hinge_loss=False, hinge_thresh=0.5, device="cpu")
+    kwargs = {
+        "nw_data": nw_data,
+        "output_channel": output_channel,
+        "emb_dim": emb_dim,
+        "in_emb_dim": in_emb_dim,
+        "drop_out": drop_out,
+        "sn": sn,
+        "sln": sln,
+        "h_dim": h_dim,
+        "w_dim": w_dim,
+        "num_head": num_head,
+        "depth": depth,
+        "gamma": gamma,
+        "max_num": max_num,
+        "ext_coeff": ext_coeff,
+        "patch_size": patch_size,
+        "num_source": num_source
+    }
+
+    if not use_f0 and not use_encoder:
+        discriminator, generator = get_models(model_names, **kwargs)
+        f0 = None
+        w_encoder = None
+        encoder = None
+    elif use_f0 and not use_encoder:
+        discriminator, generator, f0, w_encoder = get_models(model_names, **kwargs)
+        encoder = None
+    elif not use_f0 and use_encoder:
+        discriminator, generator, encoder = get_models(model_names, **kwargs)
+        f0 = None
+        w_encoder = None
+    else:
+        discriminator, generator, f0, w_encoder, encoder = get_models(model_names, **kwargs)
+
+    airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=image_data, encoder=encoder, h_dim=h_dim, emb_dim=emb_dim, f0=f0,
+                 hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, patch_size=patch_size, device=device)
+
+    airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
 
 
 

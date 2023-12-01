@@ -3,8 +3,15 @@
 *.pth
 *.npy
 *.png
+*.jpg
+*.mp4
+*.mov
 data/test
 /trained_models
+
+# cache
+__pycache__
+cache/
 
 # configs
 *.ini

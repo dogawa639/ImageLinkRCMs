@@ -2,6 +2,7 @@ import json
 import pickle
 
 import numpy as np
+import pandas as pd
 
 import shapely
 from shapely.geometry import Point
@@ -10,7 +11,7 @@ import pyproj
 
 from PIL import Image
 
-__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "Coord", "MapSegmentation"]
+__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv_with_encoding", "Coord", "MapSegmentation"]
 
 
 def load_json(file):
@@ -85,6 +86,16 @@ def load_1d_array(file):
     array = np.array([float(x) for x in line.split()])
     return array
 
+
+def read_csv_with_encoding(file, encodings=["utf-8","shift-jis", "cp932"]):
+    for enc in encodings:
+        try:
+            df = pd.read_csv(file, encoding=enc)
+            return df
+        except:
+            pass
+
+
 class Coord:
     # 座標変換用
     def __init__(self, utm_num):
@@ -141,5 +152,7 @@ class MapSegmentation:
         if np_file is not None:
             np.save(np_file, one_hot)
         return one_hot
+
+
 
 

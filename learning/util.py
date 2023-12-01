@@ -4,7 +4,7 @@ from learning.encoder import *
 from learning.w_encoder import *
 
 def get_models(model_names, nw_data, output_channel, emb_dim, in_emb_dim, drop_out, sn, sln, h_dim, w_dim,
-               num_head=3, depth=6, gamma=0.9, max_num=40, ext_coeff=1.0):
+               num_head=3, depth=6, gamma=0.9, max_num=40, ext_coeff=1.0, patch_size=None, num_source=0):
     # model_names: list of str
 
     # FNW(self, h_dim, w_dim)
@@ -19,17 +19,17 @@ def get_models(model_names, nw_data, output_channel, emb_dim, in_emb_dim, drop_o
     models = []
     for model_name in model_names:
         if model_name == "FNW":
-            models.append(FF(h_dim, w_dim), bias=True, sn=False)
+            models.append(FF(h_dim, w_dim, bias=True, sn=False))
         elif model_name == "CNNDis":
             models.append(CNNDis(nw_data, output_channel, gamma=gamma, max_num=max_num, sn=True, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))
         elif model_name == "GNNDis":
-            models.append(GNNDis(nw_data, emb_dim, output_channel, gamma=gamma, in_emb_dim=in_emb_dim, num_head=num_head, dropout=drop_out, depth=depth, sn=sn, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))
+            models.append(GNNDis(nw_data, emb_dim, output_channel, gamma=gamma, in_emb_dim=in_emb_dim, num_head=num_head, dropout=drop_out, depth=depth, sn=True, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))
         elif model_name == "CNNGen":
             models.append(CNNGen(nw_data, output_channel, max_num=max_num, sln=sln, w_dim=w_dim))
         elif model_name == "GNNGen":
             models.append(GNNGen(nw_data, emb_dim, output_channel, enc_dim=emb_dim, in_emb_dim=in_emb_dim, num_head=num_head, dropout=drop_out, depth=depth, pre_norm=False, sn=sn, sln=sln, w_dim=w_dim))
-        elif model_name == "CNNEncoder":
-            models.append(CNNEnc(nw_data, output_channel, max_num=max_num, sln=sln, w_dim=w_dim))
+        elif model_name == "CNNEnc":
+            models.append(CNNEnc(patch_size, emb_dim, num_source=num_source, sln=sln, w_dim=w_dim))
         elif model_name == "CNNWEnc":
             models.append(CNNWEnc(nw_data.feature_num, w_dim))
         elif model_name == "GNNWEnc":

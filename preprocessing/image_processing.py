@@ -4,11 +4,12 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
 import time
 import os
 
 from utility import load_json, dump_json, Coord
-
+from preprocessing.dataset import PatchDataset
 __all__ = ["ImageData"]
 
 # 画像データの読み込み，座標付与
@@ -108,7 +109,7 @@ class ImageData:
                 target_mask = (voronoi_lids == edge.undir_id)
                 x_idxs = np.where(target_mask.sum(axis=0) > 0)[0]
                 y_idxs = np.where(target_mask.sum(axis=1) > 0)[0]
-                print(len(x_idxs), len(y_idxs))
+                print(f"patch shape link {edge.id} ({len(x_idxs)}, {len(y_idxs)})")
                 if len(x_idxs) > 0 and len(y_idxs) > 0:
                     cropped_image = image[np.ix_(list(range(image.shape[0])), y_idxs, x_idxs)]
                     if cropped_image.shape[1] > patch_size:
@@ -124,6 +125,38 @@ class ImageData:
 
             yield patches
             data_idx += 1
+
+    def compress_patches(self, comp_fn, patch_size=256, device="cpu"):
+        # callable: function to compress patches
+        # for i in range(len(image_data)):
+        #    patches = image_data.load_link_patches()
+        for i, patches in enumerate(self.load_link_patches(patch_size=patch_size)):
+            dataset = PatchDataset(patches)
+            dataloader = DataLoader(dataset, batch_size=8, shuffle=False)
+            cnt = 0
+            for j, batch in enumerate(dataloader):
+                batch = batch.to(device)
+                compressed_tmp = comp_fn(batch)
+                bs_tmp = len(compressed_tmp)
+                if j == 0:
+                    mid_dim = compressed_tmp.shape[1]
+                    compressed = np.zeros((len(patches), mid_dim), dtype=np.float32)
+                compressed[cnt:cnt+bs_tmp] = compressed_tmp.detach.cpu().numpy()
+                cnt += bs_tmp
+            path = self.data_list[i]["path"].replace(".png", "_compressed.npy")
+            self.data_list[i]["compressed_path"] = path
+            np.save(path, compressed)
+
+    def load_compressed_patches(self, i):
+        # i: int
+        # for i in range(len(image_data)):
+        #    patches = image_data.load_link_patches()
+        if "compressed_path" not in self.data_list[i]:
+            print("Set compressed patches first!")
+            return None
+        compressed = np.load(self.data_list[i]["compressed_path"])
+        return compressed
+
 
     def load_link_masks(self):
         # 直前に呼び出したset_voronoiに対応する．

@@ -73,6 +73,7 @@ class SLN(nn.Module):
     def forward(self, hidden):
         # hidden: (*, h_size)
         # self.w: tensor(bs, w_dim) or (w_dim)
+        # output: (*, h_size)
         if self.w is None:
             raise Exception("w should be set before forward")
         add_dim = len(hidden.shape) - self.h_dim - (self.w.dim() - 1)

@@ -18,14 +18,14 @@ __all__ = ["PP"]
 
 
 class PP:
-    def __init__(self, data, network):
+    def __init__(self, data, nw_data):
         # all property of network is already set.
         if type(data) == str:
             data = pd.read_csv(data)  # [ID, a, k, b(last link)] or [ID, tid, a, k, b(last link)]
-        self.data = data  # [ID, a, k, b(last link)] or [ID, tid, a, k, b(last link)]
-        self.network = network
+        self.data = data  # [ID, a, k, b] or [ID, tid, a, k, b], b: last link
+        self.nw_data = nw_data
 
-        self.path_dict, self.tid2org, self.org2tid = PP.get_path_dict(self.data, self.network)  # {"tid": {"path": [link_id], "d_node": node_id}}
+        self.path_dict, self.tid2org, self.org2tid = PP.get_path_dict(self.data, self.nw_data)  # {"tid": {"path": [link_id], "d_node": node_id}}
         self.tids = list(self.path_dict.keys())
 
     def __len__(self):
@@ -38,7 +38,7 @@ class PP:
                 break
             tid = self.tids[idx]
             path = self.path_dict[tid]["path"]
-            edge_list = [self.network.edges[link_id] for link_id in path]
+            edge_list = [self.nw_data.edges[link_id] for link_id in path]
 
             yield edge_list
             idx += 1
@@ -59,16 +59,17 @@ class PP:
                 tmp_tids = tids_shuffled[trip_nums[i - 1]:trip_nums[i]]
             tmp_orgs = [self.tid2org[tid] for tid in tmp_tids]
             tmp_data = self.data.loc[self.data["ID"].isin(tmp_orgs), :]
-            tmp_pp = PP(tmp_data, self.network)
+            tmp_pp = PP(tmp_data, self.nw_data)
             result.append(tmp_pp)
         return result
 
+    # visualization
     def write_geo_file(self, file_path, driver=None):
         # [seq, tid, geometry]
         result = []
         for tid, trip in self.path_dict.items():
-            geom = [(self.network.edges[link_id].start.lon, self.network.edges[link_id].start.lat) for link_id in trip["path"]]
-            geom.append((self.network.edges[trip["path"][-1]].end.lon, self.network.edges[trip["path"][-1]].end.lat))
+            geom = [(self.nw_data.edges[link_id].start.lon, self.nw_data.edges[link_id].start.lat) for link_id in trip["path"]]
+            geom.append((self.nw_data.edges[trip["path"][-1]].end.lon, self.nw_data.edges[trip["path"][-1]].end.lat))
             geom = shapely.geometry.LineString(geom)
             if "tid" in trip:
                 result.append([tid, trip["tid"], geom])
@@ -77,8 +78,44 @@ class PP:
         gdf = gpd.GeoDataFrame(result, columns=["seq", "ID", "geometry"])
         gdf.to_file(file_path, driver=driver)
 
+    def plot_path(self, trip_id, trip_path, loc_path, trip_time_format="%Y-%m-%d %H:%M:%S", loc_time_format="%Y-%m-%d %H:%M:%S.%f"):
+        # trip_id: original id if exists, otherwise tid
+        # trip_path: path of trip data
+        # loc_path: path of location data
+        if "tid" not in self.data.columns:
+            raise ValueError("this method requires original trip id in data.")
+        coord = Coord(self.nw_data.utm_num)
+        trip_data = pd.read_csv(trip_path)
+        loc_data = pd.read_csv(loc_path)
+
+        trip_data = trip_data[trip_data["ID"] == trip_id]
+        uid = trip_data["ユーザーID"].values[0]
+        loc_data = loc_data[loc_data["ユーザーID"] == uid]
+
+        trip_data["出発時刻"] = np.vectorize(lambda x: datetime.datetime.strptime(x, trip_time_format))(
+            trip_data["出発時刻"].values)
+        trip_data["到着時刻"] = np.vectorize(lambda x: datetime.datetime.strptime(x, trip_time_format))(
+            trip_data["到着時刻"].values)
+        loc_data["記録日時"] = np.vectorize(lambda x: datetime.datetime.strptime(x, loc_time_format))(
+            loc_data["記録日時"].values)
+
+        loc_data = loc_data[(loc_data["記録日時"] >= trip_data["出発時刻"].values[0]) & (loc_data["記録日時"] <= trip_data["到着時刻"].values[0])]
+        loc_data[["x", "y"]] = np.array([coord.to_utm(loc_data.loc[i, "lon"], loc_data.loc[i, "lat"]) for i in loc_data.index])
+
+        fig, ax = plt.subplots(dpi=200)
+        tids = self.org2tid[trip_id]
+        lid2idx = {lid: i for i, lid in enumerate(self.nw_data.lids)}
+        for tid in tids:
+            idxs = [lid2idx[lid] for lid in self.path_dict[tid]["path"]]
+            path = {idxs[-1]: idxs}
+            c = np.random.random()
+            colors = {idxs[-1]: c}
+            self.nw_data.plot_paths(path, ax=ax, colors=colors)
+        ax.scatter(loc_data["x"], loc_data["y"], s=1, c="r")
+        plt.show()
+
     @staticmethod
-    def get_path_dict(data, network):
+    def get_path_dict(data, nw_data):
         # real_data: {"tid": {"path": [link_id], "d_node": node_id}}
         # tid2org: {"tid": "org_id"}
         # org2tid: {"org_id": ["tid"]}
@@ -97,8 +134,8 @@ class PP:
             if "tid" in data.columns:
                 org_tid = target["tid"].values[0]
 
-            tmp_path = [(i, v[0]) for i, v in enumerate(val) if v[0] in network.edges]
-            tmp_path2 = {i: v[1] for i, v in enumerate(val) if v[1] in network.edges}
+            tmp_path = [(i, v[0]) for i, v in enumerate(val) if v[0] in nw_data.edges]
+            tmp_path2 = {i: v[1] for i, v in enumerate(val) if v[1] in nw_data.edges}
             if len(tmp_path) == 0:
                 continue
             cnt += 1
@@ -108,7 +145,7 @@ class PP:
                     path.append(tmp_edge)
                     if i not in tmp_path2:  # if the next link is not in the network
                         last_link = path[-1]
-                        real_data[tid] = {"path": path, "d_node": network.edges[last_link].end.id}
+                        real_data[tid] = {"path": path, "d_node": nw_data.edges[last_link].end.id}
                         if org_tid is not None:
                             real_data[tid]["tid"] = org_tid
                         tid2org[tid] = t
@@ -117,7 +154,7 @@ class PP:
                     elif idx == len(tmp_path) - 1:  # if the next link is in the network and this is the last link
                         path.append(tmp_path2[i])
                         last_link = path[-1]
-                        real_data[tid] = {"path": path, "d_node": network.edges[last_link].end.id}
+                        real_data[tid] = {"path": path, "d_node": nw_data.edges[last_link].end.id}
                         if org_tid is not None:
                             real_data[tid]["tid"] = org_tid
                         tid2org[tid] = t
@@ -130,29 +167,39 @@ class PP:
         return real_data, tid2org, org2tid
 
     @staticmethod
-    def map_matching(trip_path, loc_path, nw_data, utm_num, thresh= 60, loc_time_format="%Y-%m-%d %H:%M:%S.%f", trip_time_format="%Y-%m-%d %H:%M:%S"):
+    def map_matching(trip_path, feeder_path, loc_path, nw_data, mode_code, out_file=None, thresh= 60, loc_time_format="%Y-%m-%d %H:%M:%S.%f", feeder_time_format="%Y-%m-%d %H:%M:%S", trip_time_format="%Y-%m-%d %H:%M:%S"):
         # thresh: sec to regard as the separated trip
-        coord = Coord(utm_num)
-        trip_data = pd.read_csv(trip_path)  # ID,ユーザーID,作成日時,出発時刻,到着時刻,更新日時,有効性,目的コード（active）
-        loc_data = pd.read_csv(loc_path)  # ID,accuracy,bearing,speed,ユーザーID,作成日時,経度,緯度,記録日時,高度
+        coord = Coord(nw_data.utm_num)
+        trip_data = read_csv_with_encoding(trip_path)  # ID,ユーザーID,作成日時,出発時刻,到着時刻,更新日時,有効性,目的コード（active）
+        feeder_data = read_csv_with_encoding(feeder_path)  # ID,トリップID,ユーザーID,作成日時,操作タイプ(1:出発、5:移動手段変更),更新日時,有効性,移動手段コード,記録日時
+        loc_data = read_csv_with_encoding(loc_path)  # ID,accuracy,bearing,speed,ユーザーID,作成日時,経度,緯度,記録日時,高度
 
         trip_data["出発時刻"] = np.vectorize(lambda x: datetime.datetime.strptime(x, trip_time_format))(trip_data["出発時刻"].values)
         trip_data["到着時刻"] = np.vectorize(lambda x: datetime.datetime.strptime(x, trip_time_format))(trip_data["到着時刻"].values)
+        feeder_data["記録日時"] = np.vectorize(lambda x: datetime.datetime.strptime(x, feeder_time_format))(feeder_data["記録日時"].values)
         loc_data["記録日時"] = np.vectorize(lambda x: datetime.datetime.strptime(x, loc_time_format))(loc_data["記録日時"].values)
 
-        loc_data[["x", "y"]] = np.array([coord.to_utm(loc_data.loc[i, "lat"], loc_data.loc[i, "lon"]) for i in loc_data.index])
+        # loc data clipping by network
+        loc_data[["x", "y"]] = np.array([coord.to_utm(loc_data.loc[i, "lon"], loc_data.loc[i, "lat"]) for i in loc_data.index])
         node_pints = shapely.geometry.MultiPoint([(node.x, node.y) for node in nw_data.nodes.values()])
         convex_hull = node_pints.convex_hull
         loc_data = loc_data.loc[[convex_hull.contains(shapely.geometry.Point(x)) for x in loc_data[["x", "y"]].values], :]
 
         user_loc_data = {uid: Trip(uid, 0) for uid in loc_data["ユーザーID"].unique()}
         for uid in user_loc_data.keys():
-            target = loc_data.loc[loc_data["ユーザーID"] == uid, :]
+            target = loc_data[loc_data["ユーザーID"] == uid]
             user_loc_data[uid].set_points(target["記録日時"].values, target[["x", "y"]].values)
 
         tree = KDTree(np.array([(node.x, node.y) for node in nw_data.nodes.values()]), leaf_size=2)
 
+        # recursive function
         def forward(path, i, link_dist_inv, candidates, near_link, gps_points):
+            # path: [link]
+            # i: index of gps
+            # link_dist_inv: [gps_point, link]
+            # candidates: [link] candidates for link of i-th gps
+            # near_link: [link] candidates in path
+            # gps_points: [(x, y)] gps points
             if i == 0 and len(candidates) == 0:
                 return path
             elif len(candidates) == 0:
@@ -181,26 +228,41 @@ class PP:
         for idx in trip_data.index:
             tid = trip_data.loc[idx, "ID"]
             uid = trip_data.loc[idx, "ユーザーID"]
-            dep_time = trip_data.loc[idx, "出発時刻"]
+            # feeder 記録日時 is departure time of the unlinked trip
+            # trip 到着時刻 is arrival time of the linked trip
             end_time = trip_data.loc[idx, "到着時刻"]
-            target = user_loc_data[uid].clip(dep_time, end_time)
-            if len(target) == 0:
-                continue
-            trip_list = target.split_by_thresh(thresh)
-            for trip in trip_list:
-                near_nodes = tree.query(trip_list.gps_points, k=3, return_distance=False).flatten().unique()
-                near_link = set(sum([nw_data.nodes[node_id].downstream for node_id in near_nodes], []))
+            feeder_tmp = feeder_data[(feeder_data["ユーザーID"] == uid) & (feeder_data["トリップID"] == tid)]
+            feeder_tmp = feeder_tmp.sort_values("ID")
+            for j, f_idx in enumerate(feeder_tmp.index):
+                feeder_dep_time = feeder_tmp.loc[f_idx, "記録日時"]
+                if feeder_tmp.loc[f_idx, "移動手段コード"] != mode_code:
+                    continue
+                if j < len(feeder_tmp) - 1:
+                    feeder_end_time = feeder_tmp.loc[feeder_tmp.index[j+1], "記録日時"]
+                else:
+                    feeder_end_time = end_time
 
-                path = []
-                link_dist_inv = csr_matrix((len(trip.gps_points), len(near_link)))
-                path = forward(path, 0, link_dist_inv, [nl in near_link for nl in near_link], near_link, trip.gps_points)
-                path = [link.id for link in path]
+                target = user_loc_data[uid].clip(feeder_dep_time, feeder_end_time)
+                if len(target) == 0:
+                    continue
+                trip_list = target.split_by_thresh(thresh)  # split the feeder trip when the time interval is too long
+                for trip in trip_list:
+                    near_nodes = tree.query(trip_list.gps_points, k=3, return_distance=False).flatten().unique()
+                    near_link = set(sum([nw_data.nodes[node_id].downstream for node_id in near_nodes], []))
 
-                if len(path) > 1:
-                    tmp_result = [[seq, path[i], path[i+1], path[-1].id, tid] for i in range(len(path)-1)]
-                    result.extend(tmp_result)
-                    seq += 1
-        return pd.DataFrame(result, columns=["ID", "k", "a", "b", "tid"])  # original trip id is tid
+                    path = []
+                    link_dist_inv = csr_matrix((len(trip.gps_points), len(near_link)))
+                    path = forward(path, 0, link_dist_inv, [nl in near_link for nl in near_link], near_link, trip.gps_points)
+                    path = [link.id for link in path]
+
+                    if len(path) > 1:
+                        tmp_result = [[seq, path[i], path[i+1], path[-1].id, tid] for i in range(len(path)-1)]
+                        result.extend(tmp_result)
+                        seq += 1
+        df = pd.DataFrame(result, columns=["ID", "k", "a", "b", "tid"])  # original trip id is tid
+        if out_file is not None:
+            df.to_csv(out_file, index=False)
+        return df
 
 
 class Trip:
@@ -276,16 +338,21 @@ if __name__ == "__main__":
     node_path = read_data["node_path"]
     link_path = read_data["link_path"]
     link_prop_path = read_data["link_prop_path"]
-    #pp_path = json.loads(read_data["pp_path"])
-    pp_path = ["/Users/dogawa/Desktop/bus/mapmatching/output/matsuyama_proc/walk/result_free.csv"]
+    pp_path = json.loads(read_data["pp_path"])
 
     nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
 
-    pp_data = [PP(path, nw_data) for path in pp_path]
-    pp_train_test = [tmp_pp_data.split_into([0.8, 0.2]) for tmp_pp_data in pp_data]
-    print(len(pp_data[0]), len(pp_train_test[0][0]), len(pp_train_test[0][1]))
+    pp_data = PP(pp_path[0], nw_data)
+    pp_train_test = pp_data.split_into([0.8, 0.2])
+    print(len(pp_data), len(pp_train_test[0]), len(pp_train_test[1]))
 
-    print(pp_data[0].path_dict[1])
-    print(pp_data[0].tids[1])
-    pp_data[0].write_geo_file("/Users/dogawa/PycharmProjects/GANs/data/test/pp_ped.geojson", driver="GeoJSON")
+    print(pp_data.path_dict[1])
+    print(pp_data.tids[1])
+    #pp_data.write_geo_file("/Users/dogawa/PycharmProjects/GANs/data/test/pp_ped.geojson", driver="GeoJSON")
+    loc_path = "/Users/dogawa/Desktop/bus/R4松山ｰ新宿観光PP調査（PP調査データ）/locationMatsuyama2022_2.csv"
+    feeder_path = "/Users/dogawa/Desktop/bus/R4松山ｰ新宿観光PP調査（PP調査データ）/feederMatsuyama2022.csv"
+    trip_path = "/Users/dogawa/Desktop/bus/R4松山ｰ新宿観光PP調査（PP調査データ）/tripMatsuyama2022.csv"
+    mode_code = 100
+    PP.map_matching(trip_path, feeder_path, loc_path, nw_data, mode_code, out_file="/Users/dogawa/PycharmProjects/GANs/debug/data/pp_ped.csv")
+
 

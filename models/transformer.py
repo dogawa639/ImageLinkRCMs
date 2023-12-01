@@ -98,7 +98,7 @@ class MultiHeadSelfAttention(MultiHeadAttention):
 
 class TransformerBlock(nn.Module):
     def __init__(self, emb_dim, 
-                 in_emb_dim=None, num_head=1, dropout=0.0, pre_norm=False, sn=False, sln=False, w_dim=None):
+                 in_emb_dim=None, num_head=1, dropout=0.0, pre_norm=False, sn=False, sln=False, w_dim=None, atten_fn="matmul"):
         super().__init__()
         self.emb_dim = emb_dim
         self.in_emb_dim = in_emb_dim
@@ -118,7 +118,7 @@ class TransformerBlock(nn.Module):
             self.layer_norm2 = SLN(w_dim, emb_dim)
         self.dropout = nn.Dropout(p=dropout)
 
-        self.attention = MultiHeadAttention(emb_dim, in_emb_dim=in_emb_dim, num_head=num_head, dropout=dropout, output_atten=True, sn=sn)  # output: (*, input_channel, emb_dim)
+        self.attention = MultiHeadAttention(emb_dim, in_emb_dim=in_emb_dim, num_head=num_head, dropout=dropout, output_atten=True, sn=sn, atten_fn=atten_fn)  # output: (*, input_channel, emb_dim)
         self.ff = FF(emb_dim, emb_dim, emb_dim*2, sn=sn)
 
         self.w = None
@@ -167,7 +167,7 @@ class TransformerBlock(nn.Module):
 class TransformerEncoder(nn.Module):
     # input, output: (bs, input_channel, emb_dim)
     def __init__(self, emb_dim, 
-                 enc_dim=None, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False):
+                 enc_dim=None, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None, output_atten=False, atten_fn="matmul"):
         super().__init__()
         self.emb_dim = emb_dim
         self.enc_dim = enc_dim
@@ -187,7 +187,8 @@ class TransformerEncoder(nn.Module):
             "pre_norm": pre_norm, 
             "sn": sn, 
             "sln": sln, 
-            "w_dim": w_dim
+            "w_dim": w_dim,
+            "atten_fn": atten_fn,
             }
         self.tf_blocks = nn.ModuleList([TransformerBlock(emb_dim, **kwargs) for _ in range(depth)])
         if enc_dim is not None:
