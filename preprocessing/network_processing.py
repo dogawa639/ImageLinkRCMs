@@ -283,7 +283,7 @@ class NetworkBase:
         self.sc_link.mean_ = params[0]
         self.sc_link.scale_ = params[1]
 
-    def plot_link(self, link_ids, colors=None, title=None, ax=None, xlim=None, ylim=None, cmap="jet", show_colorbar=True):
+    def plot_link(self, link_ids, colors=None, alphas=None, title=None, ax=None, xlim=None, ylim=None, cmap="jet", show_colorbar=True):
         width, headwidth, headlength = 0.002, 2, 2.5
         show_fig = False
         if ax is None:
@@ -300,6 +300,8 @@ class NetworkBase:
                 norm = plt.Normalize(vmin=v_min, vmax=v_max)
                 sm = plt.cm.ScalarMappable(cmap=cm, norm=norm)
                 plt.colorbar(sm, ax=ax)
+        if alphas is None:
+            alphas = [1.0 for _ in link_ids]
 
         xs = []
         ys = []
@@ -316,7 +318,7 @@ class NetworkBase:
             ys.append(edge.start.y + dy)
             us.append(edge.end.x - edge.start.x)
             vs.append(edge.end.y - edge.start.y)
-        ax.quiver(xs, ys, us, vs, color=colors, width=width, headwidth=headwidth, headlength=headlength, angles="xy", scale_units="xy", scale=1)
+        ax.quiver(xs, ys, us, vs, color=colors, alpha=alphas, width=width, headwidth=headwidth, headlength=headlength, angles="xy", scale_units="xy", scale=1)
         if title is not None:
             ax.set_title(title)
         if xlim is not None:
@@ -336,6 +338,7 @@ class NetworkBase:
             colors = {d_idx: np.random.random() for d_idx in paths.keys()}
         link_ids = self.lids
         colors_total = [0.0 for _ in link_ids]
+        alphas_total = [0.5 for _ in link_ids]
         d_node_x = []
         d_node_y = []
         d_node_c = []
@@ -343,6 +346,7 @@ class NetworkBase:
             for path in paths[d_idx]:
                 for idx in path:
                     colors_total[idx] = colors[d_idx]
+                    alphas_total[idx] = 1.0
                     d_node = self.edges[self.lids[d_idx]].end
                     d_node_x.append(d_node.x)
                     d_node_y.append(d_node.y)
@@ -357,11 +361,11 @@ class NetworkBase:
         if "cmap" not in kwargs:
             kwargs["cmap"] = "jet"
 
-        ax = self.plot_link(link_ids, colors_total, **kwargs)
+        ax = self.plot_link(link_ids, colors_total, alphas_total, **kwargs)
         cm = plt.get_cmap(kwargs["cmap"])
         v_max, v_min = np.max(colors_total), np.min(colors_total)
         d_node_c = [cm((c - v_min) / (v_max - v_min)) for c in d_node_c]
-        ax.scatter(d_node_x, d_node_y, c=d_node_c)
+        ax.scatter(d_node_x, d_node_y, s=2, c=d_node_c)
         if return_ax:
             return ax
         plt.show()
@@ -436,8 +440,7 @@ class NetworkBase:
         lid2idx = {lid: i for i, lid in enumerate(self.lids)}
         for i, edge in enumerate(self.edges.values()):
             for edge_down in edge.end.downstream:
-                if edge.undir_id != edge_down.undir_id:
-                    self.edge_graph[i, lid2idx[edge_down.id]] = (edge.length + edge_down.length) / 2.0
+                self.edge_graph[i, lid2idx[edge_down.id]] = (edge.length + edge_down.length) / 2.0
 
     def _set_shortest_path_all(self):
         kwrds = {"directed": True, "return_predecessors": True}
