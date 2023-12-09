@@ -1,9 +1,12 @@
 # data
+*.xml
 *.csv
 *.pth
 *.npy
 *.png
 *.jpg
+*.tif
+*.tiff
 *.mp4
 *.mov
 data/
