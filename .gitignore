@@ -21,6 +21,3 @@ cache/
 
 # system
 /.idea
-
-# test
-test.json

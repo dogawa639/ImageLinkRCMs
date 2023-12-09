@@ -1,0 +1,18 @@
+{
+    "out_dir": "/Users/dogawa/PycharmProjects/GANs/debug/data",
+    "lids": {
+        "1": [
+            9333,
+            10902
+        ]
+    },
+    "images": [
+        [
+            "1_0.jpg",
+            "1_1.jpg",
+            "1_2.jpg",
+            "1_3.jpg"
+        ]
+    ],
+    "size": "256x256"
+}
