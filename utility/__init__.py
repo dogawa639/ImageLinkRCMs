@@ -1,3 +1,4 @@
+import os
 import json
 import pickle
 
@@ -11,7 +12,7 @@ import pyproj
 
 from PIL import Image
 
-__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv_with_encoding", "Coord", "MapSegmentation"]
+__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv", "Coord"]
 
 
 def load_json(file):
@@ -87,13 +88,28 @@ def load_1d_array(file):
     return array
 
 
-def read_csv_with_encoding(file, encodings=["utf-8","shift-jis", "cp932"]):
+def read_csv(file, encodings=["utf-8","shift-jis", "cp932"]):
+    # save npz file in _csv folder
+    f_name, d_name = os.path.split(file)
+    save_dir = file.replace(".csv", "_csv")
+    # npz file exists
+    if os.path.exists(save_dir):
+        if os.path.getmtime(save_dir) > os.path.getmtime(file):  # npz file is newer than csv file
+            nval = np.load(os.path.join(save_dir, "val.npz"), allow_pickle=True)
+            return pd.DataFrame({k: nval[k] for k in nval.files})
+        else:
+            os.remove(save_dir)
     for enc in encodings:
         try:
             df = pd.read_csv(file, encoding=enc)
+            # save npz file
+            os.makedirs(save_dir)
+            kwargs = {str(col): df[col] for col in df.columns}
+            np.savez(os.path.join(save_dir, "val.npz"), **kwargs)
             return df
         except:
             pass
+    raise Exception("CSV file not loaded.")
 
 
 class Coord:
@@ -115,43 +131,6 @@ class Coord:
         return (wgs_point.x, wgs_point.y)
     
 
-class MapSegmentation:
-    # 地図の色からクラスのone-hot vectorを作成する
-    def __init__(self, files):
-        self.files = files
-        self.color_dict = self._load_color_dict() # key: (r,g,b), value: class_num
-        self.class_num = len(self.color_dict)
-
-        self.color_list = [None] * self.class_num
-        for k,v in self.color_dict.items():
-            self.color_list[v] = k
-
-    def _load_color_dict(self):
-        color_dict = {}
-        for file in self.files:
-            input_image = Image.open(file)
-            input_image = input_image.convert("RGB")
-            input_image = np.array(input_image)
-            for i in range(input_image.shape[0]):
-                for j in range(input_image.shape[1]):
-                    color = tuple(input_image[i,j,:])
-                    if color not in color_dict:
-                        color_dict[color] = len(color_dict)
-        return color_dict
-
-    def convert_file(self, file, np_file=None):
-        input_image = Image.open(file)
-        input_image = input_image.convert("RGB")
-        input_image = np.array(input_image)
-        one_hot = np.zeros((self.class_num, input_image.shape[0], input_image.shape[1]), dtype=np.uint8)# (C, H, W)
-        for i in range(input_image.shape[0]):
-            for j in range(input_image.shape[1]):
-                color = tuple(input_image[i,j,:])
-                if color in self.color_dict:
-                    one_hot[self.color_dict[color], i, j] = 1.0
-        if np_file is not None:
-            np.save(np_file, one_hot)
-        return one_hot
 
 
 

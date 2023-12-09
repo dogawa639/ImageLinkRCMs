@@ -1,5 +1,6 @@
 import numpy as np
 import osmnx as ox
+import pandas as pd
 import geopandas as gpd
 import shapely.geometry
 
@@ -7,29 +8,41 @@ __all__ = ["NX2GDF"]
 
 
 class NX2GDF:
-    def __init__(self, G):
+    def __init__(self, G, utm_num, tolerance=5.0):
         # G: networkx multi di graph
         # nodes: geopandas dataframe geometry:shapely.geometry.point.Point
         # edges: geopandas dataframe geometry:shapely.geometry.linestring.LineString
         self.G = G
+        self.tolerance = tolerance
+        self.utm_num = utm_num
+        self.epsg = 2442 + utm_num
         self.nodes, self.edges = ox.graph_to_gdfs(G)
         self.edges = self.edges.reset_index()
+
+        # simplify geometry
+        self.edges.set_crs(epsg=4326, inplace=True)
+        self.edges.to_crs(epsg=self.epsg, inplace=True)
+        self.edges["geometry"] = self.edges["geometry"].simplify(tolerance=tolerance)
+        self.edges.to_crs(epsg=4326, inplace=True)
 
         self._add_edge_info()
         self._divide_MultiLineString()
         self._divide_LineString()
         self._create_bidirection()
 
-        self.nodes.to_crs(epsg=4326, inplace=True)
-        self.edges.to_crs(epsg=4326, inplace=True)
+        self.nodes.set_crs(epsg=4326, inplace=True)
+        self.edges.set_crs(epsg=4326, inplace=True)
+        self.no_exist_edges.set_crs(epsg=4326, inplace=True)
 
 
-    def save(self, node_file, edge_file):
+    def save(self, node_file, edge_file, no_exist_edge_file=None):
         self.nodes.to_file(node_file)
         self.edges.to_file(edge_file)
+        if no_exist_edge_file is not None:
+            self.no_exist_edges.to_file(no_exist_edge_file)
 
     def to_epsg(self, epsg):
-        return self.nodes.to_crs(epsg=epsg, inplace=False), self.edges.to_crs(epsg=epsg, inplace=False)
+        return self.nodes.to_crs(epsg=epsg, inplace=False), self.edges.to_crs(epsg=epsg, inplace=False), self.no_exist_edges.to_crs(epsg=epsg, inplace=False)
 
     def _add_edge_info(self):
         # lanes, highway
@@ -61,7 +74,7 @@ class NX2GDF:
                     append_val = np.concatenate((append_val, tmp_val), axis=0)
         if append_val is not None:
             val = np.concatenate((val, append_val), axis=0)
-        return gpd.GeoDataFrame(val, columns=self.edges.columns)
+        self.edges = gpd.GeoDataFrame(val, columns=self.edges.columns)
 
     def _divide_LineString(self):
         cols = self.edges.columns.tolist()
@@ -85,7 +98,7 @@ class NX2GDF:
                 append_val = np.concatenate((append_val, tmp_val), axis=0)
         if append_val is not None:
             val = np.concatenate((val, append_val), axis=0)
-        return gpd.GeoDataFrame(val, columns=self.edges.columns)
+        self.edges =  gpd.GeoDataFrame(val, columns=self.edges.columns)
 
     def _create_bidirection(self):
         cols = self.edges.columns.tolist()
@@ -97,9 +110,10 @@ class NX2GDF:
         motorway = self.edges["highway"].values == "motorway"
         oneway = self.edges["oneway"].values
         append_val = None
+        no_exist_val = None  # opposite direction of oneway
         for i in range(len(self.edges)):
             tmp_geom = geoms[i]
-            geoms[i] = shapely.geometry.LineString(tmp_geom.coords[::-1])
+            geoms[i] = shapely.geometry.LineString(tmp_geom.coords[::-1])  # reversed geometry
             if reversed[i]:
                 val[i, geom_idx] = geoms[i]
             if (not oneway[i]) and (not motorway[i]):
@@ -109,9 +123,22 @@ class NX2GDF:
                     append_val = tmp_val
                 else:
                     append_val = np.concatenate((append_val, tmp_val), axis=0)
+            else:
+                tmp_val = val[[i], :]
+                tmp_val[0, geom_idx] = geoms[i]
+                if no_exist_val is None:
+                    no_exist_val = tmp_val
+                else:
+                    no_exist_val = np.concatenate((no_exist_val, tmp_val), axis=0)
         if append_val is not None:
             val = np.concatenate((val, append_val), axis=0)
-        return gpd.GeoDataFrame(val, columns=self.edges.columns)
+        self.edges = gpd.GeoDataFrame(val, columns=self.edges.columns)
+        self.no_exist_edges = gpd.GeoDataFrame(no_exist_val, columns=self.edges.columns)
+        # remove duplicated
+        self.edges = self.edges[~self.edges["geometry"].duplicated()]
+        all_edges = pd.concat([self.edges["geometry"], self.no_exist_edges["geometry"]], axis=0)
+        idx = ~all_edges.duplicated().values[len(self.edges):]
+        self.no_exist_edges = self.no_exist_edges[idx]
 
     @staticmethod
     def get_lane(lane):

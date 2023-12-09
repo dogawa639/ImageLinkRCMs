@@ -161,7 +161,7 @@ class GNNDis(nn.Module):
 
 # test
 if __name__ == "__main__":
-    from preprocessing.network_processing import *
+    from preprocessing.network import *
     from utility import *
 
     device = "mps"

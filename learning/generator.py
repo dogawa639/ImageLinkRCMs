@@ -169,7 +169,7 @@ class GNNGen(nn.Module):
 
 # for test
 if __name__ == "__main__":
-    from preprocessing.network_processing import *
+    from preprocessing.network import *
 
     device = "mps"
     node_path = '/Users/dogawa/Desktop/bus/estimation/data/node.csv'

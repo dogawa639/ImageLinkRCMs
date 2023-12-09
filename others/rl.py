@@ -13,7 +13,7 @@ import time
 import os
 
 from utility import *
-from preprocessing.network_processing import *
+from preprocessing.network import *
 
 
 class RL:
@@ -278,8 +278,8 @@ class RL:
 if __name__ == "__main__":
     import json
     import configparser
-    from preprocessing.network_processing import *
-    from preprocessing.pp_processing import *
+    from preprocessing.network import *
+    from preprocessing.pp import *
     from models.general import FF
     from models.gnn import GAT, GT
     from torch import nn
@@ -291,7 +291,7 @@ if __name__ == "__main__":
 
     device = "mps"
 
-    CONFIG = "/Users/dogawa/PycharmProjects/GANs/config/config_test.ini"
+    CONFIG = "/Users/dogawa/PycharmProjects/GANs/config/config_all.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
 

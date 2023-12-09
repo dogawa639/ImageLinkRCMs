@@ -5,7 +5,7 @@ from torch.optim.lr_scheduler import ConstantLR
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 
-from torchvision import transforms
+import torchvision.transforms.v2 as transforms
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -20,10 +20,10 @@ import datetime
 
 import os
 
-from utility import MapSegmentation
-from preprocessing.pp_processing import PP
+from utility import read_csv, MapSegmentation
+from preprocessing.pp import PP
 
-__all__ = ["GridDataset", "PPEmbedDataset", "PatchDataset", "ImageDataset", "calc_loss"]
+__all__ = ["GridDataset", "PPEmbedDataset", "PatchDataset", "XImageDataset", "XYImageDataset", "ImageDataset", "calc_loss"]
 
 
 class GridDataset(Dataset):
@@ -215,6 +215,7 @@ class PPEmbedDataset(Dataset):
 
 
 class PatchDataset(Dataset):
+    # all data are preloaded
     def __init__(self, patches):
         # patches: [(C, H, W)]
         self.patches = patches
@@ -226,7 +227,247 @@ class PatchDataset(Dataset):
         return len(self.patches)
 
 
+class ImageDatasetBase(Dataset):
+    def __init__(self, input_shape=(256, 256), crop=True, affine=True, transform_coincide=True, flip=True):
+        self.input_shape = input_shape
+        self.crop = crop
+        self.affine = affine
+        self.transform_coincide = transform_coincide
+        self.flip = flip
+
+        self.preprocess = transforms.Compose([
+                transforms.PILToTensor(),
+                transforms.ToDtype(torch.float32),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+
+        if crop:
+            self.rc = transforms.RandomCrop(input_shape, pad_if_needed=True)
+        if affine:
+            self.ra_params = [
+                (-90, 90),  # degree
+                (0.1, 0.1),  # translate
+                (0.9, 1.1),  # scale
+                (0, 0, 0, 0),  # shear
+                self.input_shape  # img_size
+            ]
+        else:
+            self.ra_params = [
+                (0, 0),  # degree
+                (0, 0),  # translate
+                (1.0, 1.0),  # scale
+                (0, 0, 0, 0),  # shear
+                self.input_shape  # img_size
+            ]
+        self.ra = transforms.RandomAffine(*self.ra_params[0:-1])
+
+    def __len__(self):
+        raise NotImplementedError
+
+    def __getitem__(self, item):
+        raise NotImplementedError
+
+    def transform_by_params(self, img_tensor, ra_params, rc_params, h_flip, v_flip):
+        shape = img_tensor.shape  # (C, H, W)
+        transformed = img_tensor
+        mask = torch.ones(shape[1:], dtype=torch.float32)
+        idx = tensor(np.arange(shape[1] * shape[2], dtype=int).reshape(*shape[1:]))
+        # affine
+        if self.affine:
+            transformed = transforms.functional.affine(transformed, *ra_params)
+            mask = self._get_mask(shape, ra_params)
+            idx = self._get_affine_origin_idx(shape, ra_params)  # idx for original tensor
+        # crop
+        if self.crop:
+            transformed = transforms.functional.crop(transformed, *rc_params)
+            mask = transforms.functional.crop(mask, *rc_params)
+            idx = transforms.functional.crop(idx, *rc_params)
+        else:
+            transformed = transforms.functional.center_crop(transformed, self.input_shape)
+            mask = transforms.functional.center_crop(mask, self.input_shape)
+            idx = transforms.functional.center_crop(idx, self.input_shape)
+        # flip
+        if h_flip:
+            transformed = transforms.functional.hflip(transformed)
+            mask = transforms.functional.hflip(mask)
+            idx = transforms.functional.hflip(idx)
+        if v_flip:
+            transformed = transforms.functional.vflip(transformed)
+            mask = transforms.functional.vflip(mask)
+            idx = transforms.functional.vflip(idx)
+
+        return transformed, mask, idx
+
+    def get_transform_params(self, img_tensor):
+        ra_params = None
+        rc_params = None
+        h_flip = False
+        v_flip = False
+        if self.affine:
+            ra_params = self.ra.get_params(*self.ra_params)
+        if self.crop:
+            rc_params = self.rc.get_params(img_tensor, self.input_shape)
+        if self.flip:
+            h_flip = torch.rand(1) < 0.5
+            v_flip = torch.rand(1) < 0.5
+        return ra_params, rc_params, h_flip, v_flip
+
+    def affine_by_origin_idx(self, img_tensor, idx):
+        # img_tensor (N, C, H, W) or (C, H, W)
+        # idx_transformed (N, H, W) or (H, W)
+        # img_tensor[idx] = transformed
+        # return transformed
+        idx = idx.to("cpu")
+        idx = idx.unsqueeze(-3)
+        img_channels = img_tensor.shape[-3]
+        img_resolv = img_tensor.shape[-2] * img_tensor.shape[-1]
+        # add batch dim
+        if img_tensor.dim() == 3:
+            img_tensor = img_tensor.unsqueeze(0)
+        if idx.dim() == 3:
+            idx = idx.unsqueeze(0)
+
+        idx = idx.repeat(1, img_channels, 1, 1)
+        null_idx = idx < 0
+        batch_num = (np.arange(img_tensor.numel()) / img_resolv).astype(int) * img_resolv  # when img shape (bs, C, H, W)
+        batch_num = tensor(batch_num, dtype=int, device="cpu").view(img_tensor.shape)
+        idx = idx + batch_num
+        idx[null_idx] = 0
+
+        transformed = tensor(np.zeros(img_tensor.shape), dtype=img_tensor.dtype, device=img_tensor.device)
+        transformed.reshape(-1)[:] = img_tensor.reshape(-1)[idx.reshape(-1)]
+        transformed.reshape(-1)[null_idx.reshape(-1)] = 0
+
+        return transformed
+
+    def padding2size(self, img_tensor, size):
+        # size: (H, W)
+        # img_tensor: (*, H, W)
+        # return: (*, size[0], size[1])
+        if img_tensor.shape[-2] < size[0] or img_tensor.shape[-1] < size[1]:
+            pad = (max(0, size[1] - img_tensor.shape[-1]), max(0, size[0] - img_tensor.shape[-2]))
+            pad = (pad[0] // 2, pad[1] - pad[1] // 2, pad[0] - pad[0] // 2, pad[1] // 2)
+            img_tensor = transforms.functional.pad(img_tensor, pad, padding_mode="constant", fill=0)
+        return img_tensor
+
+    def _get_mask(self, shape, ra_params):
+        # ra_params: (degree, translate, scale, shear, img_size)
+        # return: (H, W)
+        mask = torch.ones((1, *shape[1:]), dtype=torch.float32)
+        if self.affine:
+            mask = transforms.functional.affine(mask, *ra_params)
+        mask = mask.squeeze(0)
+        return mask
+
+    def _get_affine_origin_idx(self, shape, ra_params):
+        # idx of tensor before transform for each pixel after transform
+        # image_org[idx_transformed] = image_transformed
+        # return (H, W)
+        idx = tensor(np.arange(shape[1] * shape[2], dtype=int).reshape((1, *shape[1:])))
+        if self.affine:
+            idx = transforms.functional.affine(idx, *ra_params,
+                                                       interpolation=transforms.InterpolationMode.NEAREST, fill=-1)
+        idx = idx.unsqueeze(0)
+        return idx
+
+class XImageDataset(ImageDatasetBase):
+    # data structure:
+    #     if corresponds  base_dir/**/*.png for base_dir in base_dirs (**, * are the same)
+    #     else:
+    #         base_dir/**/*.png
+    def __init__(self, base_dirs, corresponds=False, expansion=1, *args, **kargs):
+        # base_dirs: [dir]
+        # corresponds: if True, base_dirs have same structure
+        # args, kargs: input_shape=(520, 520), crop=True, affine=True, transform_coincide=True, flip=True
+        super().__init__(*args, **kargs)
+        self.base_dirs = base_dirs
+        self.corresponds = corresponds
+        self.expansion = expansion if self.affine or self.crop or self.flip else 1
+
+        self._load_data_paths()  # self.files: [[absolute paths]]
+
+    def __len__(self):
+        return len(self.files[0]) * self.expansion
+
+    def __getitem__(self, item):
+        # (img_tensor, transformed, mask, idx)
+        # img_tensor, transformed: (C, H, W)
+        # mask, idx: (H, W)
+        item = item // self.expansion
+
+        data_list = []
+        for i in range(len(self.base_dirs)):
+            img_tensor = self.preprocess(Image.open(self.files[i][item]))  # (C, H, W)
+            img_tensor = self.padding2size(img_tensor, self.input_shape)
+            if i == 0:
+                params = self.get_transform_params(img_tensor)
+            transformed, mask, idx = self.transform_by_params(img_tensor, *params)
+            data_list.append((img_tensor, transformed, mask, idx))
+        return tuple(data_list)
+
+    #visualization
+    def show_samples(self, num_samples=1):
+        items = np.random.choice(len(self), num_samples, replace=False)
+        fig = plt.figure(tight_layout=True)
+        for i, item in enumerate(items):
+            data_tuple = self[item]
+            for j, (img_tensor, _, _, _) in enumerate(data_tuple):
+                ax = fig.add_subplot(num_samples, len(self.files), i * len(self.files) + j + 1)
+                img = img_tensor.permute(1, 2, 0).numpy()
+                min_val = img.min()
+                max_val = img.max()
+                img = ((img - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                ax.imshow(img)
+                ax.set_axis_off()
+        plt.show()
+
+
+    # inside function
+    def _load_data_paths(self):
+        # self.files: [[path]]
+        self.files = [set() for _ in range(len(self.base_dirs))]  # absolute paths
+        for i, base_dir in enumerate(self.base_dirs):
+            for cur_dir, dirs, files in os.walk(base_dir):
+                for file in files:
+                    if file.endswith(".png"):
+                        cur_path = os.path.join(cur_dir, file)
+                        cur_path = os.path.relpath(cur_path, base_dir)
+                        self.files[i].add(cur_path)
+        if self.corresponds:
+            file_set = set.intersection(*self.files)
+            file_list = list(file_set)
+            self.files = [[os.path.join(base_dir, cur_path) for cur_path in file_list] for base_dir in self.base_dirs]
+        else:
+            self.files = [list(file_set) for file_set in self.files]
+            self.files = [[os.path.join(base_dir, cur_path) for i, base_dir in enumerate(self.base_dirs) for cur_path in self.files[i]]]
+
+
+class XYImageDataset(XImageDataset):
+    # y_file: [Path, ...], csv
+    def __init__(self, base_dirs, y_file, *args, **kwargs):
+        # x_dirs: [dir]
+        # y_file: file
+        super().__init__(base_dirs, *args, **kwargs)
+        self.y_file = y_file
+        y_df = read_csv(y_file)
+        y_df.set_index("Path", drop=True, inplace=True)
+
+        self.y = [[tensor(y_df.loc[cur_path, :].values, dtype=torch.float32) for cur_path in file_list] for file_list in self.files]  # [[1d tensor]] corresponding to self.files
+
+    def __getitem__(self, item):
+        # ((img_tensor, transformed, mask, idx)), [y]
+        item = item // self.expansion
+        data_tuple = super().__getitem__(item)
+        y_tuple = tuple([self.y[i][item] for i in range(len(self.base_dirs))])
+        return data_tuple, y_tuple
+
+
+class XHImageDataset(XImageDataset):
+    # x and pixcelwise one-hot
+
+
 class ImageDataset(Dataset):
+    # semantic segmentation
     # for unsupervised learning
     def __init__(self, files, additional_files=None, output_files=None, input_shape=(520, 520), num_sample=200):
         # files:[png file]

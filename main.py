@@ -51,11 +51,11 @@ if __name__ == "__main__":
 
     # # load and process data
     # image data
-    image_data = ImageData(data_path["image_data"])
+    image_data = image.SatelliteImageData(data_path["image_data"])
     # network data
-    nw_data = NWData(data_path["nw_data"])
+    nw_data = network.NWData(data_path["nw_data"])
     # pp data
-    pp_data = PPData(data_path["pp_data"])
+    pp_data = pp.PPData(data_path["pp_data"])
 
     # # learning
     if cross_valid > 0:

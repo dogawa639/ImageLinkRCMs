@@ -321,9 +321,9 @@ if __name__ == "__main__":
     from learning.encoder import *
     from learning.w_encoder import *
     from learning.util import get_models
-    from preprocessing.network_processing import *
-    from preprocessing.pp_processing import *
-    from preprocessing.image_processing import *
+    from preprocessing.network import *
+    from preprocessing.pp import *
+    from preprocessing.image import *
     from preprocessing.dataset import *
 
     CONFIG = "/Users/dogawa/PycharmProjects/GANs/config/config_test.ini"
@@ -394,7 +394,7 @@ if __name__ == "__main__":
     image_data = None
     num_source = 0
     if image_data_path is not None:
-        image_data = ImageData(image_data_path)
+        image_data = SatelliteImageData(image_data_path)
         num_source = len(image_data)
     # model_names : [str] [discriminator, generator, (f0, w_encoder), (encoder)]
     model_names = ["CNNDis", "CNNGen"] if model_type == "cnn" else ["GNNDis", "GNNGen"]
