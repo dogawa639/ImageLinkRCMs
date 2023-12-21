@@ -8,12 +8,12 @@ from models.general import FF, SLN
 
 import numpy as np
 
-# forward input(patch(bs, c, h, width), w) -> (bs, emb_dim)
+# forward input(satellite(bs, c, h, width), w) -> (bs, emb_dim)
 # w: None -> bs=1
 # w: tensor(bs, w_dim) -> bs=bs
 
 class CNNEnc(nn.Module):
-    def __init__(self, patch_size, emb_dim, num_source=1, sln=True, w_dim=10):
+    def __init__(self, patch_size, emb_dim, mid_dim=1000, num_source=1, sln=True, w_dim=10):
         super().__init__()
         if type(patch_size) is int:
             patch_size = (3, patch_size, patch_size)
@@ -21,11 +21,9 @@ class CNNEnc(nn.Module):
         self.emb_dim = emb_dim
         self.sln = sln
         self.w_dim = w_dim
-        self.mid_dim = 1000
+        self.mid_dim = mid_dim
 
-        self.resnet50 = resnet50(weights=ResNet50_Weights.DEFAULT, replace_stride_with_dilation=[False, True, True])
-        for param in self.resnet50.parameters():
-            param.requires_grad = False
+        self.resnet50 = resnet50(weights=ResNet50_Weights.DEFAULT, num_classes=mid_dim)
 
         self.lin = nn.ModuleList([FF(self.mid_dim, emb_dim, self.mid_dim*2, bias=True) for _ in range(num_source)])
         self.norm0 = nn.LayerNorm(patch_size)
@@ -38,7 +36,7 @@ class CNNEnc(nn.Module):
 
         self.seq = nn.Sequential(
             self.norm0,
-            self.resnet50  # output: (1, 1000)
+            self.resnet50  # output: (1, mid_dim)
         )
 
     def forward(self, x, source_i=0, w=None):
@@ -68,7 +66,7 @@ class CNNEnc(nn.Module):
         return x
 
     def compress(self, patch):
-        # patch: (bs2, c, h, width) or (c, h, width)
+        # satellite: (bs2, c, h, width) or (c, h, width)
         if patch.dim() == 3:
             patch = patch.unsqueeze(0)  # (1, c, h, w)
         x = self.seq(patch)   # (bs2, 1000)

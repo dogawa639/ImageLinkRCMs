@@ -15,6 +15,7 @@ import os
 from utility import *
 from preprocessing.network import *
 
+__all__ = ["RL"]
 
 class RL:
     # link to link

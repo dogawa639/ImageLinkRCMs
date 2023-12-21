@@ -171,6 +171,8 @@ class PP:
         trip_data = read_csv(trip_path)  # ID,ユーザーID,作成日時,出発時刻,到着時刻,更新日時,有効性,目的コード（active）
         feeder_data = read_csv(feeder_path)  # ID,トリップID,ユーザーID,作成日時,操作タイプ(1:出発、5:移動手段変更),更新日時,有効性,移動手段コード,記録日時
         loc_data = read_csv(loc_path)  # ID,accuracy,bearing,speed,ユーザーID,作成日時,経度,緯度,記録日時,高度
+        if type(mode_code) is int:
+            mode_code = {mode_code}
 
         trip_data["出発時刻"] = np.vectorize(lambda x: datetime.datetime.strptime(x, trip_time_format))(trip_data["出発時刻"].values)
         trip_data["到着時刻"] = np.vectorize(lambda x: datetime.datetime.strptime(x, trip_time_format))(trip_data["到着時刻"].values)
@@ -217,7 +219,7 @@ class PP:
                         v = np.array([gps_points[i + 1, 0] - gps_points[i, 0], gps_points[i + 1, 1] - gps_points[i, 1]])
                     else:
                         v = np.array([gps_points[i, 0] - gps_points[i - 1, 0], gps_points[i, 1] - gps_points[i - 1, 1]])
-                    mul = min(np.abs(np.linalg.norm(v) / np.dot(v, near_link[j].e)), 2.0)
+                    mul = min(np.linalg.norm(v) / max(1e-2, np.abs(np.dot(v, near_link[j].e))), 2.0)
                     dist = dist * mul
                     j_prev = prev_links[i, j]
                     if j_prev < 0:  # no previous link for (i-th gps, link j)
@@ -262,7 +264,7 @@ class PP:
             feeder_tmp = feeder_tmp.sort_values("ID")
             for j, f_idx in enumerate(feeder_tmp.index):
                 feeder_dep_time = feeder_tmp.loc[f_idx, "記録日時"]
-                if feeder_tmp.loc[f_idx, "移動手段コード"] != mode_code:
+                if feeder_tmp.loc[f_idx, "移動手段コード"] not in mode_code:
                     continue
                 if j < len(feeder_tmp) - 1:
                     feeder_end_time = feeder_tmp.loc[feeder_tmp.index[j+1], "記録日時"]
@@ -314,7 +316,7 @@ class PP:
                         if len(tmp_result) > 0:
                             result.extend(tmp_result)
                             seq += 1
-        df = pd.DataFrame(result, columns=["ID", "k", "a", "b", "org"])  # original trip id is org
+        df = pd.DataFrame(result, columns=["ID", "k", "a", "b", "org"]).astype(int)  # original trip id is org
         if out_file is not None:
             df.to_csv(out_file, index=False)
         return df
@@ -380,7 +382,7 @@ class Trip:
             trips.append(self)
         else:
             idxs = idxs + 1
-            idxs = np.append(idxs, len(self.gps_times))
+            idxs = np.append(idxs, len(self.gps_times) - 1)
             idxs = np.insert(idxs, 0, 0)
             for i in range(len(idxs) - 1):
                 trips.append(self.clip(self.gps_times[idxs[i]], self.gps_times[idxs[i + 1]]))

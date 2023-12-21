@@ -1,0 +1,174 @@
+if __name__ == "__main__":
+    import torch
+    from torch.utils.data import DataLoader
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import time
+    import os
+    import json
+    import configparser
+    from preprocessing.dataset import *
+    from models.deeplabv3 import deeplabv3_resnet50, ResNet50_Weights
+    from utility import *
+    from logger import Logger
+
+    CONFIG = "../../config/config_all.ini"
+    config = configparser.ConfigParser()
+    config.read(CONFIG, encoding="utf-8")
+
+    read_general = config["GENERAL"]
+    device = read_general["device"]
+
+    read_data = config["DATA"]
+    node_path = read_data["node_path"]  # csv
+    link_path = read_data["link_path"]  # csv
+    link_prop_path = read_data["link_prop_path"]  # csv
+    image_data_path = read_data["image_data_path"]  # json
+    image_data_dir = read_data["satellite_image_datadir"]  # dir
+    onehot_data_path = read_data["onehot_data_path"]  # json
+    onehot_data_dir = read_data["onehot_image_datadir"]  # dir
+
+    read_save = config["SAVE"]
+    model_dir = read_save["model_dir"]
+    log_dir = read_save["log_dir"]
+
+    TRINING = False
+    TESTING = True
+    EARLY_STOP = True
+    SAVE_MODEL = True
+
+    case_name = "sat2lu_" + ("train" if TRINING else "") + ("test" if TESTING else "")
+
+    image_data = load_json(image_data_path)
+    base_dirs_x = [os.path.join(image_data_dir, x["name"]) for x in image_data]
+    one_hot_data = load_json(onehot_data_path)
+    base_dirs_h = [os.path.join(onehot_data_dir, x["name"]) for x in one_hot_data]
+
+    num_classes = 10  # class_num (including other class, class_num = -1)
+
+    kwargs = {"expansion": 2,
+              "crop": True,
+              "affine": True,
+              "transform_coincide": True,
+              "flip": True}
+    loader_kwargs = {"batch_size": 4,
+                     "shuffle": True,
+                     "num_workers": 2,
+                     "pin_memory": True}
+
+    xhimage_dataset = XHImageDataset(base_dirs_x, base_dirs_h, **kwargs)
+    train_data, val_data, test_data = xhimage_dataset.split_into((0.1, 0.02, 0.02))
+    train_dataloader = DataLoader(train_data, **loader_kwargs)
+    val_dataloader = DataLoader(val_data, **loader_kwargs)
+    test_dataloader = DataLoader(test_data, **loader_kwargs)
+
+    model = deeplabv3_resnet50(weights_backbone=ResNet50_Weights.DEFAULT, num_classes=num_classes).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
+
+    logger = Logger(os.path.join(log_dir, f"{case_name}.json"), CONFIG)
+    model_path = os.path.join(model_dir, "sat2lu.pth")
+    # train, val
+    if TRINING:
+        min_loss = np.inf
+        stop_count = 0
+        for epoch in range(100):
+            t1 = time.perf_counter()
+            model.train()
+            tmp_loss = 0.0
+            # data_tuple_x, data_tuple_h
+            # data_tuple[i]: (img_tensor_x, transformed_x, mask_x, idx_x)
+            for batch_x, batch_h in train_dataloader:
+                batch_x[1] = batch_x[1].to(device)
+                batch_h[1] = batch_h[1].to(device)
+                batch_x[2] = batch_x[2].to(device)
+                optimizer.zero_grad()
+                out = model(batch_x[1])["out"]  # (N, C, H, W)
+                loss = torch.sum(loss_fn(out, batch_h[1]) * batch_x[2])
+                l1_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
+                for w in model.parameters():
+                    l1_loss = l1_loss + torch.sum(torch.abs(w))
+                loss_total = loss + 0.0001 / 2.0 ** epoch * l1_loss
+                loss_total.backward()
+                optimizer.step()
+                tmp_loss += loss.clone().cpu().detach().item()
+            train_loss = tmp_loss / len(train_dataloader)
+            logger.add_log("train_loss", train_loss)
+
+            model.eval()
+            tmp_loss = 0.0
+            # (img_tensor_x, transformed_x, mask_x, idx_x)
+            for batch_x, batch_h in val_dataloader:
+                batch_x[1] = batch_x[1].to(device)
+                batch_h[1] = batch_h[1].to(device)
+                batch_x[2] = batch_x[2].to(device)
+                out = model(batch_x[1])["out"]  # (N, C, H, W)
+                loss = torch.sum(loss_fn(out, batch_h[1]) * batch_x[2])
+                tmp_loss += loss.clone().cpu().detach().item()
+            val_loss = tmp_loss / len(val_dataloader)
+            logger.add_log("val_loss", val_loss)
+
+            if EARLY_STOP:
+                if val_loss < min_loss:
+                    min_loss = val_loss
+                    if SAVE_MODEL:
+                        torch.save(model.cpu().state_dict(), model_path)
+                        logger.add_prop("model", model_path)
+                        model.to(device)
+                    stop_count = 0
+                else:
+                    stop_count += 1
+                if stop_count >= 5:
+                    print("Early Stopping.")
+                    break
+            t2 = time.perf_counter()
+            print(f"epoch: {epoch}, train_loss: {train_loss}, val_loss: {val_loss}, time: {t2 - t1}")
+        print(f"min_val_loss: {min_loss}")
+
+    if TESTING:
+        # test
+        model = deeplabv3_resnet50(weights_backbone=ResNet50_Weights.DEFAULT, num_classes=num_classes)
+        model.load_state_dict(torch.load(model_path))
+        model.to(device)
+
+        model.eval()
+        tmp_loss = 0.0
+        # (img_tensor_x, transformed_x, mask_x, idx_x)
+        sample_num = 3
+        fig1 = plt.figure()
+        fig2 = plt.figure()
+        for i, (batch_x, batch_h) in enumerate(test_dataloader):
+            batch_x[0] = batch_x[0].to(device)
+            batch_h[0] = batch_h[0].to(device)
+            batch_x[2] = batch_x[2].to(device)
+            out = model(batch_x[0])["out"]  # (N, C, H, W)
+            loss = torch.sum(loss_fn(out, batch_h[0]) * batch_x[2])
+            tmp_loss += loss.clone().cpu().detach().item()
+            if i < sample_num:
+                ax = fig1.add_subplot(sample_num, 1, i + 1)
+                mi = batch_x[0][0].cpu().detach().numpy().min()
+                ma = batch_x[0][0].cpu().detach().numpy().max()
+                ax.imshow(((batch_x[0][0].cpu().detach().numpy().transpose(1, 2, 0) - mi) / (ma - mi) * 255).astype(np.uint8))
+                ax.set_title(f"original_{i}")
+                ax = fig2.add_subplot(sample_num, 2, i * 2 + 1)
+                ax.imshow(out[0].argmax(0).cpu().detach().numpy())
+                ax.set_title(f"predicted_{i}")
+                ax = fig2.add_subplot(sample_num, 2, i * 2 + 2)
+                ax.imshow(batch_h[0][0].cpu().detach().numpy())
+                ax.set_title(f"ground_truth_{i}")
+        fig1.savefig(os.path.join(log_dir, f"{case_name}_original.png"))
+        fig2.savefig(os.path.join(log_dir, f"{case_name}_predicted.png"))
+        plt.show()
+        test_loss = tmp_loss / len(test_dataloader)
+        print(f"test_loss: {test_loss}")
+        logger.add_prop("test_loss", test_loss)
+
+
+    logger.save_fig(os.path.join(log_dir, f"{case_name}.png"))
+    logger.close()
+
+
+
+
+

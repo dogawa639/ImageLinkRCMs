@@ -101,6 +101,9 @@ class Edge:
         mask = np.array([d_edge in edge_ids for edge_ids in action_edge_ids])
         return mask
 
+    def clear_undir_id(self):
+        self.undir_id = -1
+
     @staticmethod
     def get_length(start, end):
         return np.sqrt((start.x - end.x) ** 2 + (start.y - end.y) ** 2)
@@ -184,7 +187,10 @@ class NetworkBase:
         self.nodes, self.nids = self._set_nodes()  # dict key: id, value: Node
         self.edges_all, self.lids_all = self._set_edges()  # dict key: id, value: Edge
 
-        self.set_mode(mode)
+        self._set_edge_nodes()  # (start, end): linkId
+        self._set_undir_id()  # set undir_id for all edges
+
+        self.set_mode(mode)  # self.edges, self.lids are set.
 
         self.node_props = []
         self.link_props = Edge.base_prop
@@ -257,8 +263,6 @@ class NetworkBase:
         self._clear_connectivity()
         self._set_downstream()  # add downstream edges to each node
         self._set_upstream()  # add upstream edges to each node
-        self._set_edge_nodes()  # (start, end): linkId
-        self._set_undir_id()  # set undir_id for all edges
 
         self._set_graphs()  # adj cost matrix [start,end], adj cost matrix 線グラフ
         self._set_shortest_path_all()
@@ -451,15 +455,15 @@ class NetworkBase:
             self.nodes[edge.end.id].add_upstream(edge)
 
     def _set_edge_nodes(self):
-        self.edge_nodes = {(edge.start.id, edge.end.id): edge.id for edge in self.edges.values()}
+        self.edge_nodes = {(edge.start.id, edge.end.id): edge.id for edge in self.edges_all.values()}
 
     def _set_undir_id(self):
         self.undir_edges = dict()  # key: undir_id, value: [lid]
         undir_id = 1
         for k, v in self.edge_nodes.items():
-            edge = self.edges[v]
+            edge = self.edges_all[v]
             if (k[1], k[0]) in self.edge_nodes:
-                inv_edge = self.edges[self.edge_nodes[(k[1], k[0])]]
+                inv_edge = self.edges_all[self.edge_nodes[(k[1], k[0])]]
                 if inv_edge.undir_id > 0:  # 逆方向リンクがすでに追加されていた場合
                     edge.undir_id = inv_edge.undir_id
                     self.undir_edges[edge.undir_id].append(v)

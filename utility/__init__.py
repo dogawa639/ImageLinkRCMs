@@ -1,6 +1,7 @@
 import os
 import json
 import pickle
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -98,7 +99,7 @@ def read_csv(file, encodings=["utf-8","shift-jis", "cp932"]):
             nval = np.load(os.path.join(save_dir, "val.npz"), allow_pickle=True)
             return pd.DataFrame({k: nval[k] for k in nval.files})
         else:
-            os.remove(save_dir)
+            shutil.rmtree(save_dir)
     for enc in encodings:
         try:
             df = pd.read_csv(file, encoding=enc)

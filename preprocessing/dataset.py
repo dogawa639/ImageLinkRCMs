@@ -20,10 +20,11 @@ import datetime
 
 import os
 
-from utility import read_csv, MapSegmentation
+from utility import read_csv, load_json, dump_json
+from preprocessing.geo_util import MapSegmentation
 from preprocessing.pp import PP
 
-__all__ = ["GridDataset", "PPEmbedDataset", "PatchDataset", "XImageDataset", "XYImageDataset", "ImageDataset", "calc_loss"]
+__all__ = ["GridDataset", "PPEmbedDataset", "PatchDataset", "XImageDataset", "XYImageDataset", "XHImageDataset", "StreetViewDataset", "StreetViewXDataset", "ImageDataset", "calc_loss"]
 
 
 class GridDataset(Dataset):
@@ -124,12 +125,12 @@ class PPEmbedDataset(Dataset):
         return len(self.pp_data)
     
     def __getitem__(self, idx):
-        kargs = {"dtype": torch.float32, "retain_grad": False}
+        kwargs = {"dtype": torch.float32, "retain_grad": False}
         # [link_num, feature_num], [link_num, link_num]
-        return (tensor(self.feature_mat, **kargs),
-                tensor(self.nw_data.a_matrix.toarray(), **kargs).to_sparse(),  #隣接行列
-                tensor(self.pp_adj_matrices[idx].toarray(), **kargs).to_sparse(),
-                tensor(self.hs[idx], **kargs))
+        return (tensor(self.feature_mat, **kwargs),
+                tensor(self.nw_data.a_matrix.toarray(), **kwargs).to_sparse(),  #隣接行列
+                tensor(self.pp_adj_matrices[idx].toarray(), **kwargs).to_sparse(),
+                tensor(self.hs[idx], **kwargs))
 
     def get_pp_pos_embedding(self, path):
         # path: [link_id] or [edge obj]
@@ -228,8 +229,7 @@ class PatchDataset(Dataset):
 
 
 class ImageDatasetBase(Dataset):
-    def __init__(self, input_shape=(256, 256), crop=True, affine=True, transform_coincide=True, flip=True):
-        self.input_shape = input_shape
+    def __init__(self, crop=True, affine=True, transform_coincide=True, flip=True):
         self.crop = crop
         self.affine = affine
         self.transform_coincide = transform_coincide
@@ -242,24 +242,22 @@ class ImageDatasetBase(Dataset):
             ])
 
         if crop:
-            self.rc = transforms.RandomCrop(input_shape, pad_if_needed=True)
+            self.rc = transforms.RandomCrop   #(input_shape, pad_if_needed=True)
         if affine:
-            self.ra_params = [
+            self.ra_params = [ # img_size is missing
                 (-90, 90),  # degree
                 (0.1, 0.1),  # translate
                 (0.9, 1.1),  # scale
                 (0, 0, 0, 0),  # shear
-                self.input_shape  # img_size
             ]
         else:
-            self.ra_params = [
+            self.ra_params = [  # img_size is missing
                 (0, 0),  # degree
                 (0, 0),  # translate
                 (1.0, 1.0),  # scale
                 (0, 0, 0, 0),  # shear
-                self.input_shape  # img_size
             ]
-        self.ra = transforms.RandomAffine(*self.ra_params[0:-1])
+        self.ra = transforms.RandomAffine  #(*self.ra_params[0:-1])
 
     def __len__(self):
         raise NotImplementedError
@@ -268,10 +266,17 @@ class ImageDatasetBase(Dataset):
         raise NotImplementedError
 
     def transform_by_params(self, img_tensor, ra_params, rc_params, h_flip, v_flip):
+        # mask: mask for transformed
+        # img_tensor[idx] = transformed
+        no_channel = False
+        if img_tensor.dim() == 2:
+            no_channel = True
+            img_tensor = torch.unsqueeze(img_tensor, dim=0)
+
         shape = img_tensor.shape  # (C, H, W)
         transformed = img_tensor
-        mask = torch.ones(shape[1:], dtype=torch.float32)
-        idx = tensor(np.arange(shape[1] * shape[2], dtype=int).reshape(*shape[1:]))
+        mask = torch.ones(shape[-2:], dtype=torch.float32)
+        idx = tensor(np.arange(shape[-2] * shape[-1], dtype=int).reshape(*shape[-2:]))
         # affine
         if self.affine:
             transformed = transforms.functional.affine(transformed, *ra_params)
@@ -283,9 +288,9 @@ class ImageDatasetBase(Dataset):
             mask = transforms.functional.crop(mask, *rc_params)
             idx = transforms.functional.crop(idx, *rc_params)
         else:
-            transformed = transforms.functional.center_crop(transformed, self.input_shape)
-            mask = transforms.functional.center_crop(mask, self.input_shape)
-            idx = transforms.functional.center_crop(idx, self.input_shape)
+            transformed = transforms.functional.center_crop(transformed, shape[1:])
+            mask = transforms.functional.center_crop(mask, shape[1:])
+            idx = transforms.functional.center_crop(idx, shape[1:])
         # flip
         if h_flip:
             transformed = transforms.functional.hflip(transformed)
@@ -296,6 +301,9 @@ class ImageDatasetBase(Dataset):
             mask = transforms.functional.vflip(mask)
             idx = transforms.functional.vflip(idx)
 
+        if no_channel:
+            img_tensor = torch.squeeze(img_tensor, dim=0)
+            transformed = torch.squeeze(transformed, dim=0)
         return transformed, mask, idx
 
     def get_transform_params(self, img_tensor):
@@ -303,10 +311,12 @@ class ImageDatasetBase(Dataset):
         rc_params = None
         h_flip = False
         v_flip = False
+        input_shape = img_tensor.shape[-2:]
+
         if self.affine:
-            ra_params = self.ra.get_params(*self.ra_params)
+            ra_params = self.ra(*self.ra_params).get_params(*self.ra_params, input_shape)
         if self.crop:
-            rc_params = self.rc.get_params(img_tensor, self.input_shape)
+            rc_params = self.rc(input_shape, pad_if_needed=True).get_params(img_tensor, input_shape)
         if self.flip:
             h_flip = torch.rand(1) < 0.5
             v_flip = torch.rand(1) < 0.5
@@ -317,6 +327,8 @@ class ImageDatasetBase(Dataset):
         # idx_transformed (N, H, W) or (H, W)
         # img_tensor[idx] = transformed
         # return transformed
+        if img_tensor.dim() == 2:
+            raise ValueError("img_tensor must have channel dim.")
         idx = idx.to("cpu")
         idx = idx.unsqueeze(-3)
         img_channels = img_tensor.shape[-3]
@@ -341,19 +353,26 @@ class ImageDatasetBase(Dataset):
         return transformed
 
     def padding2size(self, img_tensor, size):
+        # center padding
         # size: (H, W)
         # img_tensor: (*, H, W)
         # return: (*, size[0], size[1])
+        no_channel = False
+        if img_tensor.dim() == 2:
+            no_channel = True
+            img_tensor = img_tensor.unsqueeze(0)
         if img_tensor.shape[-2] < size[0] or img_tensor.shape[-1] < size[1]:
             pad = (max(0, size[1] - img_tensor.shape[-1]), max(0, size[0] - img_tensor.shape[-2]))
             pad = (pad[0] // 2, pad[1] - pad[1] // 2, pad[0] - pad[0] // 2, pad[1] // 2)
             img_tensor = transforms.functional.pad(img_tensor, pad, padding_mode="constant", fill=0)
+        if no_channel:
+            img_tensor = img_tensor.squeeze(0)
         return img_tensor
 
     def _get_mask(self, shape, ra_params):
         # ra_params: (degree, translate, scale, shear, img_size)
         # return: (H, W)
-        mask = torch.ones((1, *shape[1:]), dtype=torch.float32)
+        mask = torch.ones((1, *shape[-2:]), dtype=torch.float32)
         if self.affine:
             mask = transforms.functional.affine(mask, *ra_params)
         mask = mask.squeeze(0)
@@ -363,7 +382,7 @@ class ImageDatasetBase(Dataset):
         # idx of tensor before transform for each pixel after transform
         # image_org[idx_transformed] = image_transformed
         # return (H, W)
-        idx = tensor(np.arange(shape[1] * shape[2], dtype=int).reshape((1, *shape[1:])))
+        idx = tensor(np.arange(shape[-2] * shape[-1], dtype=int).reshape((1, *shape[-2:])))
         if self.affine:
             idx = transforms.functional.affine(idx, *ra_params,
                                                        interpolation=transforms.InterpolationMode.NEAREST, fill=-1)
@@ -375,14 +394,16 @@ class XImageDataset(ImageDatasetBase):
     #     if corresponds  base_dir/**/*.png for base_dir in base_dirs (**, * are the same)
     #     else:
     #         base_dir/**/*.png
-    def __init__(self, base_dirs, corresponds=False, expansion=1, *args, **kargs):
+    def __init__(self, base_dirs, corresponds=False, expansion=1, *args, **kwargs):
         # base_dirs: [dir]
         # corresponds: if True, base_dirs have same structure
-        # args, kargs: input_shape=(520, 520), crop=True, affine=True, transform_coincide=True, flip=True
-        super().__init__(*args, **kargs)
+        # args, kwargs: crop=True, affine=True, transform_coincide=True, flip=True
+        super().__init__(*args, **kwargs)
         self.base_dirs = base_dirs
         self.corresponds = corresponds
         self.expansion = expansion if self.affine or self.crop or self.flip else 1
+        self.args = args
+        self.kwargs = kwargs
 
         self._load_data_paths()  # self.files: [[absolute paths]]
 
@@ -396,14 +417,31 @@ class XImageDataset(ImageDatasetBase):
         item = item // self.expansion
 
         data_list = []
-        for i in range(len(self.base_dirs)):
+        for i in range(len(self.files)):
             img_tensor = self.preprocess(Image.open(self.files[i][item]))  # (C, H, W)
-            img_tensor = self.padding2size(img_tensor, self.input_shape)
-            if i == 0:
+
+            if i == 0:  # same transformation for all data
                 params = self.get_transform_params(img_tensor)
             transformed, mask, idx = self.transform_by_params(img_tensor, *params)
             data_list.append((img_tensor, transformed, mask, idx))
         return tuple(data_list)
+
+    def split_into(self, ratio):
+        # ratio: tuple
+        if sum(ratio) > 1.0:
+            raise ValueError(f"Sum of ratio must be less than or equal to 1.")
+        shuffled_idxs = np.random.permutation(len(self.files[0]))
+        num = [int(rat * len(self.files[0])) for rat in ratio]
+        cnt = 0
+        data_list = []
+        for i in range(len(num)):
+            tmp_obj = XImageDataset([], corresponds=self.corresponds, expansion=self.expansion, *self.args, **self.kwargs)
+            tmp_obj.base_dirs = self.base_dirs
+            tmp_idxs = sorted(shuffled_idxs[cnt:cnt+num[i]])
+            tmp_obj.files = [[self.files[j][idx] for idx in tmp_idxs] for j in range(len(self.files))]
+            data_list.append(tmp_obj)
+            cnt += num[i]
+        return data_list
 
     #visualization
     def show_samples(self, num_samples=1):
@@ -421,7 +459,6 @@ class XImageDataset(ImageDatasetBase):
                 ax.set_axis_off()
         plt.show()
 
-
     # inside function
     def _load_data_paths(self):
         # self.files: [[path]]
@@ -432,24 +469,28 @@ class XImageDataset(ImageDatasetBase):
                     if file.endswith(".png"):
                         cur_path = os.path.join(cur_dir, file)
                         cur_path = os.path.relpath(cur_path, base_dir)
-                        self.files[i].add(cur_path)
+                        self.files[i].add(cur_path)  # relative path to base_dir
         if self.corresponds:
             file_set = set.intersection(*self.files)
             file_list = list(file_set)
-            self.files = [[os.path.join(base_dir, cur_path) for cur_path in file_list] for base_dir in self.base_dirs]
+            self.files = [[os.path.join(base_dir, cur_path) for cur_path in file_list] for base_dir in self.base_dirs]  # (num_basedir, *)
         else:
             self.files = [list(file_set) for file_set in self.files]
-            self.files = [[os.path.join(base_dir, cur_path) for i, base_dir in enumerate(self.base_dirs) for cur_path in self.files[i]]]
+            self.files = [[os.path.join(base_dir, cur_path) for i, base_dir in enumerate(self.base_dirs) for cur_path in self.files[i]]]  # (1, *)
 
 
 class XYImageDataset(XImageDataset):
     # y_file: [Path, ...], csv
+    #
     def __init__(self, base_dirs, y_file, *args, **kwargs):
         # x_dirs: [dir]
         # y_file: file
         super().__init__(base_dirs, *args, **kwargs)
         self.y_file = y_file
-        y_df = read_csv(y_file)
+        if type(y_file) is str:
+            y_df = read_csv(y_file)
+        else:
+            y_df = pd.DataFrame(y_file)
         y_df.set_index("Path", drop=True, inplace=True)
 
         self.y = [[tensor(y_df.loc[cur_path, :].values, dtype=torch.float32) for cur_path in file_list] for file_list in self.files]  # [[1d tensor]] corresponding to self.files
@@ -461,11 +502,328 @@ class XYImageDataset(XImageDataset):
         y_tuple = tuple([self.y[i][item] for i in range(len(self.base_dirs))])
         return data_tuple, y_tuple
 
+    def split_into(self, ratio):
+        # ratio: tuple
+        if sum(ratio) > 1.0:
+            raise ValueError(f"Sum of ratio must be less than or equal to 1.")
+        shuffled_idxs = np.random.permutation(len(self.files[0]))
+        num = [int(rat * len(self.files[0])) for rat in ratio]
+        cnt = 0
+        data_list = []
+        for i in range(len(num)):
+            tmp_obj = XYImageDataset([], self.y_file, corresponds=self.corresponds, expansion=self.expansion, *self.args, **self.kwargs)
+            tmp_obj.base_dirs = self.base_dirs
+            tmp_idxs = sorted(shuffled_idxs[cnt:cnt+num[i]])
+            tmp_obj.files = [[self.files[j][idx] for idx in tmp_idxs] for j in range(len(self.files))]
+            tmp_obj.y = [[self.y[j][idx] for idx in tmp_idxs] for j in range(len(self.files))]
+            data_list.append(tmp_obj)
+            cnt += num[i]
+        return data_list
 
-class XHImageDataset(XImageDataset):
-    # x and pixcelwise one-hot
+    # visualization
+    def show_samples(self, num_samples=1):
+        items = np.random.choice(len(self), num_samples, replace=False)
+        fig = plt.figure(tight_layout=True)
+        for i, item in enumerate(items):
+            data_tuple, y_tuple = self[item]
+            for j, (img_tensor, _, _, _) in enumerate(data_tuple):
+                ax = fig.add_subplot(num_samples, len(self.files), i * len(self.files) + j + 1)
+                img = img_tensor.permute(1, 2, 0).numpy()
+                min_val = img.min()
+                max_val = img.max()
+                img = ((img - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                ax.imshow(img)
+                ax.set_axis_off()
+            print(f"Data {i}: ", y_tuple)
+        plt.show()
 
 
+class XHImageDataset(ImageDatasetBase):
+    # x and pixel-wise one-hot
+    # base_dirs_x[i]/**/*.png corresponds to base_dirs_h[i]/**/*.png
+    def __init__(self, base_dirs_x, base_dirs_h, expansion=1, *args, **kwargs):
+        # args, kwargs: crop=True, affine=True, transform_coincide=True, flip=True
+        if len(base_dirs_x) != len(base_dirs_h):
+            raise ValueError("base_dirs_x and base_dirs_h must have the same length.")
+        super().__init__(*args, **kwargs)
+        self.preprocess_h = transforms.Compose([
+            transforms.PILToTensor(),
+            transforms.ToDtype(torch.long)
+        ])
+        self.base_dirs_x = base_dirs_x
+        self.base_dirs_h = base_dirs_h
+        self.expansion = expansion
+        self.args = args
+        self.kwargs = kwargs
+
+        self._load_data_paths()  # self.files_x, self.files_h: [absolute paths]
+
+    def __len__(self):
+        return len(self.files_x) * self.expansion
+
+    def __getitem__(self, item):
+        # (img_tensor, transformed, mask, idx)
+        # img_tensor_x, transformed_x: (C, H, W)
+        # img_tensor_h, transformed_h: (H, W) or (3, H, W)
+        # mask, idx: (H, W)
+        item = item // self.expansion
+
+        img_tensor_x = self.preprocess(Image.open(self.files_x[item]))  # (C, H, W)
+
+        params = self.get_transform_params(img_tensor_x)
+        transformed_x, mask_x, idx_x = self.transform_by_params(img_tensor_x, *params)
+
+        img_tensor_h = self.preprocess_h(Image.open(self.files_h[item]))
+        transformed_h, mask_h, idx_h = self.transform_by_params(img_tensor_h, *params)
+
+        if img_tensor_h.shape[0] == 1:
+            img_tensor_h = torch.squeeze(img_tensor_h, dim=0)
+            transformed_h = torch.squeeze(transformed_h, dim=0)
+        return (img_tensor_x, transformed_x, mask_x, idx_x), (img_tensor_h, transformed_h, mask_h, idx_h)
+
+    def split_into(self, ratio):
+        # ratio: tuple
+        if sum(ratio) > 1.0:
+            raise ValueError(f"Sum of ratio must be less than or equal to 1.")
+        shuffled_idxs = np.random.permutation(len(self.files_x))
+        num = [int(rat * len(self.files_x)) for rat in ratio]
+        cnt = 0
+        data_list = []
+        for i in range(len(num)):
+            tmp_obj = XHImageDataset([], [], expansion=self.expansion, *self.args, **self.kwargs)
+            tmp_obj.base_dirs_x = self.base_dirs_x
+            tmp_obj.base_dirs_h = self.base_dirs_h
+            tmp_idxs = sorted(shuffled_idxs[cnt:cnt+num[i]])
+            tmp_obj.files_x = [self.files_x[idx] for idx in tmp_idxs]
+            tmp_obj.files_h = [self.files_h[idx] for idx in tmp_idxs]
+            data_list.append(tmp_obj)
+            cnt += num[i]
+        return data_list
+
+    # visualization
+    def show_samples(self, num_samples=1):
+        items = np.random.choice(len(self), num_samples, replace=False)
+        fig = plt.figure(tight_layout=True)
+        for i, item in enumerate(items):
+            data_tuple_x, data_tuple_h = self[item]
+            for j, (img_tensor, _, _, _) in enumerate([data_tuple_x, data_tuple_h]):
+                ax = fig.add_subplot(num_samples, 2, i * 2 + j + 1)
+                if len(img_tensor.shape) == 3:
+                    img = img_tensor.permute(1, 2, 0).numpy()
+                else:
+                    img = img_tensor.numpy()
+                min_val = img.min()
+                max_val = img.max()
+                img = ((img - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                ax.imshow(img)
+                ax.set_axis_off()
+        plt.show()
+
+    def _load_data_paths(self):
+        # self.files: [[path]]
+        files_x = [set() for _ in range(len(self.base_dirs_x))]  # realative paths
+        for i, base_dir in enumerate(self.base_dirs_x):
+            for cur_dir, dirs, files in os.walk(base_dir):
+                for file in files:
+                    if file.endswith(".png"):
+                        cur_path = os.path.join(cur_dir, file)
+                        cur_path = os.path.relpath(cur_path, base_dir)
+                        files_x[i].add(cur_path)  # relative path to base_dir
+        files_h = [set() for _ in range(len(self.base_dirs_h))]  # realative paths
+        for i, base_dir in enumerate(self.base_dirs_h):
+            for cur_dir, dirs, files in os.walk(base_dir):
+                for file in files:
+                    if file.endswith(".png"):
+                        cur_path = os.path.join(cur_dir, file)
+                        cur_path = os.path.relpath(cur_path, base_dir)
+                        files_h[i].add(cur_path)  # relative path to base_dir
+
+        file_list = [list(set.intersection(files_x[i], files_h[i])) for i in range(len(self.base_dirs_x))]
+        self.files_x = [os.path.join(self.base_dirs_x[i], cur_path) for i in range(len(file_list)) for cur_path in file_list[i]]  # 1d array
+        self.files_h = [os.path.join(self.base_dirs_h[i], cur_path) for i in range(len(file_list)) for cur_path in file_list[i]]   # 1d array
+
+
+class StreetViewDataset(ImageDatasetBase):
+    def __init__(self, config_json, link_prop, input_shape=(256, 256), expansion=1, *args, **kwargs):
+        # config_json: {"out_dir": out_dir, "lids": {undir_id: [lids]}, "images": [[relative_path]], "size":HxW}
+        # link_prop: columns [LinkID, ...]
+        # args, kwargs: crop=True, affine=True, transform_coincide=True, flip=True
+        super().__init__(*args, **kwargs)
+        if type(config_json) is str:
+            config_json = load_json(config_json)
+        if type(link_prop) is str:
+            link_prop = read_csv(link_prop)
+
+        self.input_shape = input_shape
+        self.expansion = expansion
+        self.args = args
+        self.kwargs = kwargs
+        if len(link_prop) == 0:
+            return
+
+        self.lids = link_prop['LinkID'].values.astype(int)
+        self.y = link_prop.drop('LinkID', axis=1, inplace=False).values
+        self.lid2idx = {lid: i for i, lid in enumerate(self.lids)}
+        self.files = [[None] * 4 for _ in range(len(self.lids))]  # [[abs path 1, ..., abs path 4]], len(lids)
+        for i, tmp_lids in enumerate(config_json["lids"].values()):
+            if len(tmp_lids) == 0:
+                continue
+            for j in range(4):
+                if config_json["images"][i][j] is not None:
+                    if int(tmp_lids[0]) in self.lid2idx:
+                        self.files[self.lid2idx[int(tmp_lids[0])]][j] = os.path.join(config_json["out_dir"], config_json["images"][i][j])
+                    else:
+                        print(f"Link property for lid {int(tmp_lids[0])} is missing.")
+                if len(tmp_lids) > 1:
+                    j_inv = (j + 2) % 4
+                    if config_json["images"][i][j_inv] is not None:
+                        if int(tmp_lids[1]) in self.lid2idx:
+                            self.files[self.lid2idx[int(tmp_lids[1])]][j] = os.path.join(config_json["out_dir"], config_json["images"][i][j_inv])
+                        else:
+                            print(f"Link property for lid {int(tmp_lids[1])} is missing.")
+
+    def __len__(self):
+        return len(self.lids) * self.expansion
+
+    def __getitem__(self, item):
+        # ((img_tensor, transformed, mask, idx)), y (1d tensor)
+        item = item // self.expansion
+
+        data_list = []
+        for i in range(4):
+            if self.files[item][i] is None:
+                img_tensor = torch.zeros((3, *self.input_shape), dtype=torch.float32)
+            else:
+                img_tensor = self.preprocess(Image.open(self.files[item][i]))  # (C, H, W)
+            if i == 0:  # same transformation for all data
+                params = self.get_transform_params(img_tensor)
+            transformed, mask, idx = self.transform_by_params(img_tensor, *params)
+            data_list.append((img_tensor, transformed, mask, idx))
+
+        y_tensor = tensor(self.y[item, :], dtype=torch.float32)
+        return tuple(data_list), y_tensor
+
+    def split_into(self, ratio):
+        if sum(ratio) > 1.0:
+            raise ValueError(f"Sum of ratio must be less than or equal to 1.")
+        shuffled_idxs = np.random.permutation(len(self.lids))
+        num = [int(rat * len(self.lids)) for rat in ratio]
+        cnt = 0
+        data_list = []
+        for i in range(len(num)):
+            tmp_obj = StreetViewDataset({}, {}, expansion=self.expansion, *self.args, **self.kwargs)
+            tmp_idxs = sorted(shuffled_idxs[cnt:cnt+num[i]])
+            tmp_obj.lids = [self.lids[j] for j in tmp_idxs]
+            tmp_obj.lid2idx = {lid: j for j, lid in enumerate(tmp_obj.lids)}
+            tmp_obj.files = [self.files[j] for j in tmp_idxs]
+            tmp_obj.y = self.y[tmp_idxs, :]
+
+            data_list.append(tmp_obj)
+            cnt += num[i]
+        return data_list
+
+    # visualization
+    def show_samples(self, num_samples=1):
+        items = np.random.choice(len(self), num_samples, replace=False)
+        fig = plt.figure(tight_layout=True)
+        for i, item in enumerate(items):
+            data_tuple, y_tensor = self[item]
+            for j, (img_tensor, _, _, _) in enumerate(data_tuple):
+                ax = fig.add_subplot(num_samples, 4, i * 4 + j + 1)
+                if len(img_tensor.shape) == 3:
+                    img = img_tensor.permute(1, 2, 0).numpy()
+                else:
+                    img = img_tensor.numpy()
+                min_val = img.min()
+                max_val = img.max()
+                img = ((img - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                ax.imshow(img)
+                ax.set_axis_off()
+            print(f"Data {i}: ", y_tensor)
+        plt.show()
+
+class StreetViewXDataset(StreetViewDataset):
+    def __init__(self, config_json, base_dirs_x, link_prop, input_shapes=((256, 256), (128, 128)), expansion=1, *args, **kwargs):
+        # config_json: {"out_dir": out_dir, "lids": {undir_id: [lids]}, "images": [[relative_path]], "size":HxW}
+        # base_dirs_x: [dir] base_dirs_x[i]/{lid}.png
+        # link_prop: columns [LinkID, ...]
+        # args, kwargs: crop=True, affine=True, transform_coincide=True, flip=True
+        super().__init__(config_json, link_prop, input_shape=input_shapes[0], expansion=expansion, *args, **kwargs)
+        self.input_shapes = input_shapes
+        self.base_dirs_x = base_dirs_x
+        self.files_x = [[os.path.join(base_dir, f"{lid}.png") if os.path.exists(os.path.join(base_dir, f"{lid}.png")) else None for lid in self.lids] for base_dir in self.base_dirs_x]
+
+    def __getitem__(self, item):
+        # ((img_tensor, transformed, mask, idx)), y (1d tensor)
+        item = item // self.expansion
+        data_list, y_tensor = super().__getitem__(item)
+        data_list_x = []
+        for i in range(len(self.files_x)):
+            tmp_path = self.files_x[i][item]
+            if tmp_path is not None:
+                img_tensor_x = self.preprocess(Image.open(tmp_path))
+            else:
+                img_tensor_x = torch.zeros((3, *self.input_shapes[i+1]), dtype=torch.float32)
+            if i == 0:  # same transformation for all data
+                params = self.get_transform_params(img_tensor_x)
+            transformed_x, mask_x, idx_x = self.transform_by_params(img_tensor_x, *params)
+            data_list_x.append((img_tensor_x, transformed_x, mask_x, idx_x))
+        return tuple(data_list), tuple(data_list_x), y_tensor
+
+    def split_into(self, ratio):
+        if sum(ratio) > 1.0:
+            raise ValueError(f"Sum of ratio must be less than or equal to 1.")
+        shuffled_idxs = np.random.permutation(len(self.lids))
+        num = [int(rat * len(self.lids)) for rat in ratio]
+        cnt = 0
+        data_list = []
+        for i in range(len(num)):
+            tmp_obj = StreetViewXDataset({}, [], {}, expansion=self.expansion, *self.args, **self.kwargs)
+            tmp_idxs = sorted(shuffled_idxs[cnt:cnt+num[i]])
+            tmp_obj.base_dirs_x = self.base_dirs_x
+            tmp_obj.lids = [self.lids[j] for j in tmp_idxs]
+            tmp_obj.lid2idx = {lid: j for j, lid in enumerate(tmp_obj.lids)}
+            tmp_obj.files = [self.files[j] for j in tmp_idxs]
+            tmp_obj.files_x = [[self.files_x[k][j] for j in tmp_idxs] for k in range(len(self.files_x))]
+            tmp_obj.y = self.y[tmp_idxs, :]
+
+            data_list.append(tmp_obj)
+            cnt += num[i]
+        return data_list
+
+    # visualization
+    def show_samples(self, num_samples=1):
+        items = np.random.choice(len(self), num_samples, replace=False)
+        fig = plt.figure(tight_layout=True)
+        col = 4 + len(self.files_x)
+        for i, item in enumerate(items):
+            data_tuple, data_tuple_x, y_tensor = self[item]
+            for j, (img_tensor, _, _, _) in enumerate(data_tuple):
+                ax = fig.add_subplot(num_samples, col, i * col + j + 1)
+                if len(img_tensor.shape) == 3:
+                    img = img_tensor.permute(1, 2, 0).numpy()
+                else:
+                    img = img_tensor.numpy()
+                min_val = img.min()
+                max_val = img.max()
+                img = ((img - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                ax.imshow(img)
+                ax.set_axis_off()
+            for j, (img_tensor, _, _, _) in enumerate(data_tuple_x):
+                ax = fig.add_subplot(num_samples, col, i * col + j + 5)
+                if len(img_tensor.shape) == 3:
+                    img = img_tensor.permute(1, 2, 0).numpy()
+                else:
+                    img = img_tensor.numpy()
+                min_val = img.min()
+                max_val = img.max()
+                img = ((img - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                ax.imshow(img)
+                ax.set_axis_off()
+            print(f"Data {i}: ", y_tensor)
+        plt.show()
+
+# deprecated
 class ImageDataset(Dataset):
     # semantic segmentation
     # for unsupervised learning

@@ -68,8 +68,8 @@ class AIRL:
         if self.use_encoder:
             optimizer_e = optim.Adam(self.encoder.parameters(), lr=lr_e)
 
-        dataset_kargs = {"batch_size": batch_size, "shuffle": shuffle}
-        dataloaders_real = [[DataLoader(tmp, **dataset_kargs)
+        dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle}
+        dataloaders_real = [[DataLoader(tmp, **dataset_kwargs)
                             for tmp in dataset.split_into((train_ratio, 1-train_ratio))]
                             for dataset in self.datasets]  # [train_dataloader, test_dataloader]
         

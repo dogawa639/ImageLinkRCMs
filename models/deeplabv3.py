@@ -1,4 +1,6 @@
-#https://github.com/pytorch/vision/blob/main/torchvision/models/segmentation/deeplabv3.py
+# downloaded from https://github.com/pytorch/vision/blob/main/torchvision/models/segmentation/deeplabv3.py
+# and modified
+
 from typing import Any, Callable, Dict, Optional, Tuple, TypeVar, Union, Mapping, List, Type, Sequence
 from functools import partial
 from enum import Enum
@@ -11,13 +13,16 @@ import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 
+from models.general import FF
+
 try:
     from torch.hub import load_state_dict_from_url  # noqa: 401
 except ImportError:
     from torch.utils.model_zoo import load_url as load_state_dict_from_url  # noqa: 401
 
 __all__ = [
-    "deeplabv3_resnet50", 
+    "deeplabv3_resnet50",
+    "classifier_resnet50",
     "ResNet50_Weights", 
     "DeepLabV3_ResNet50_Weights", 
     "deeplabv3_mobilenet_v3_large", 
@@ -65,20 +70,42 @@ _COMMON_META = {
 class _SimpleSegmentationModel(nn.Module):
     __constants__ = ["aux_classifier"]
 
-    def __init__(self, backbone: nn.Module, classifier: nn.Module, aux_classifier: Optional[nn.Module] = None) -> None:
+    def __init__(self, backbones: Union[nn.Module, List[nn.Module]], classifier: nn.Module, aux_classifier: Optional[nn.Module] = None) -> None:
         super().__init__()
-        self.backbone = backbone
+        if not isinstance(backbones, list):
+            backbones = [backbones]
+        self.backbones = nn.ModuleList(backbones)  # list of nn.Module
         self.classifier = classifier
         self.aux_classifier = aux_classifier
+        self.num_backbones = len(backbones)
+
 
         self.final_classifier = nn.Sequential(
             nn.Conv2d(3 + self.classifier.num_classes, self.classifier.num_classes, 1, padding=0, bias=False),
             nn.Softmax2d()
         )
 
-    def forward_backborn(self, x: Tensor) -> Dict[str, Tensor]:
+    def forward_backborn(self, x: Union[Tensor, List[Tensor]]) -> Dict[str, Tensor]:
         # (N, 3, H, W)
-        return self.backbone(x)
+        # self.backboneNum = 1 -> x: tensor or [tensor] or [[tensor]]
+        # self.backboneNum > 1 -> x: [tensor, ..., tensor] or [[tensor], ..., [tensor]], len(x) == self.backboneNum
+        if not isinstance(x, list):
+            x = [x]
+        if len(x) != self.num_backbones:
+            if self.num_backbones == 1:
+                x = [x]
+            else:
+                raise ValueError(f"Input tensor should be a list of {self.num_backbones} tensors")
+        # x: 2d list of tensor
+        feature = None
+        for i, tmp_x in enumerate(x):  # tmp_x: tensor or [tensor]
+            tmp_feature = self.backbones[i](tmp_x)
+            if feature is None:
+                feature = tmp_feature
+            else:
+                for k in feature.keys():
+                    feature[k] = feature[k] + tmp_feature[k]
+        return feature
 
     def forward_classifier(self, features: Dict[str, Tensor], input_shape: torch.Size) -> Dict[str, Tensor]:
         result = OrderedDict()
@@ -96,20 +123,18 @@ class _SimpleSegmentationModel(nn.Module):
 
         return result
 
-    def forward(self, x: Tensor) -> Dict[str, Tensor]:
-        input_shape = x.shape[-2:]
+    def forward(self, x: Union[Tensor, List[Tensor]]) -> Dict[str, Tensor]:
+        # self.backboneNum = 1 -> x: tensor or [tensor] or [[tensor]]
+        # self.backboneNum > 1 -> x: [tensor, ..., tensor] or [[tensor], ..., [tensor]], len(x) == self.backboneNum
+        if isinstance(x, list):
+            input_shape = x[0].shape[-2:]
+        else:
+            input_shape = x.shape[-2:]
         # contract: features is a dict of tensors
         features = self.forward_backborn(x)
         result = self.forward_classifier(features, input_shape)
         result["out"] = self.final_classifier(torch.cat([x, result["out"]], dim=1))
         return result
-    
-    #def to(self, device):
-    #    self.backbone.to(device)
-     #   self.classifier.to(device)
-    #    if self.aux_classifier is not None:
-    #        self.aux_classifier.to(device)
-    #    return self
     
 
 class DeepLabV3(_SimpleSegmentationModel):
@@ -549,7 +574,7 @@ class ResNet(nn.Module):
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0])
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2, dilate=replace_stride_with_dilation[1])
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))  # output size = (N, 512 * block.expansion, 1, 1)
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
@@ -610,26 +635,35 @@ class ResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def _forward_impl(self, x: Tensor) -> Tensor:
+    def _forward_impl(self, x: Union[Tensor, List[Tensor]]) -> Tensor:
         # See note [TorchScript super()]
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.maxpool(x)
+        if not isinstance(x, list):
+            x = [x]
+        features = None
+        for tmp_x in x:
+            tmp_x = self.conv1(tmp_x)
+            tmp_x = self.bn1(tmp_x)
+            tmp_x = self.relu(tmp_x)
+            tmp_x = self.maxpool(tmp_x)
 
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+            tmp_x = self.layer1(tmp_x)
+            tmp_x = self.layer2(tmp_x)
+            tmp_x = self.layer3(tmp_x)
+            tmp_x = self.layer4(tmp_x)
 
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
+            tmp_x = self.avgpool(tmp_x)
+            tmp_x = torch.flatten(tmp_x, 1)
+            if features is None:
+                features = tmp_x
+            else:
+                features = features + tmp_x
+        features = self.fc(features)
 
-        return x
+        return features
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Union[Tensor, List[Tensor]]) -> Tensor:
         return self._forward_impl(x)
+
 
 def _resnet(
     block: Type[Union[BasicBlock, Bottleneck]],
@@ -638,6 +672,10 @@ def _resnet(
     progress: bool,
     **kwargs: Any,
 ) -> ResNet:
+    num_classes = None
+    if "num_classes" in kwargs:
+        num_classes = kwargs["num_classes"]
+        del kwargs["num_classes"]
     if weights is not None:
         _ovewrite_named_param(kwargs, "num_classes", len(weights.meta["categories"]))
 
@@ -645,7 +683,8 @@ def _resnet(
 
     if weights is not None:
         model.load_state_dict(weights.get_state_dict(progress=progress, check_hash=True))
-
+    if num_classes is not None and kwargs["num_classes"] != num_classes:
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
     return model
 
 class InterpolationMode(Enum):
@@ -844,20 +883,115 @@ def resnet50(*, weights: Optional[ResNet50_Weights] = None, progress: bool = Tru
     return _resnet(Bottleneck, [3, 4, 6, 3], weights, progress, **kwargs)
 
 
+class ResNetClassifier(nn.Module):
+    def __init__(self, backbones: Union[nn.Module, List[nn.Module]], classifier: nn.Module) -> None:
+        super().__init__()
+        if not isinstance(backbones, list):
+            backbones = [backbones]
+        self.backbones = nn.ModuleList(backbones)  # list of nn.Module
+        self.classifier = classifier
+        self.num_backbones = len(backbones)
+
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+
+    def forward_backborn(self, x: Union[Tensor, List[Tensor]]) -> Dict[str, Tensor]:
+        # (N, 3, H, W)
+        # self.backboneNum = 1 -> x: tensor or [tensor] or [[tensor]]
+        # self.backboneNum > 1 -> x: [tensor, ..., tensor] or [[tensor], ..., [tensor]], len(x) == self.backboneNum
+        if not isinstance(x, list):
+            x = [x]
+        if len(x) != self.num_backbones:
+            if self.num_backbones == 1:
+                x = [x]
+            else:
+                raise ValueError(f"Input tensor should be a list of {self.num_backbones} tensors")
+        # x: 2d list of tensor
+        feature = None
+        for i in range(self.num_backbones): # tmp_x: tensor or [tensor]
+            if not isinstance(x[i], list):
+                tmp_xs = [x[i]]
+            else:
+                tmp_xs = x[i]
+            for j in range(len(tmp_xs)):
+                tmp_x = tmp_xs[j]
+                tmp_feature = self.backbones[i](tmp_x)
+                tmp_x = tmp_feature["out"]
+                tmp_x = self.avgpool(tmp_x)
+                tmp_x = torch.flatten(tmp_x, 1)
+                tmp_feature["out"] = tmp_x
+                if feature is None:
+                    feature = tmp_feature
+                else:
+                    for k in feature.keys():
+                        feature[k] = feature[k] + tmp_feature[k]
+        return feature
+
+    def forward_classifier(self, features: Dict[str, Tensor]) -> Dict[str, Tensor]:
+        result = OrderedDict()
+        x = features["out"]
+        result["out"] = self.classifier(x)
+
+        return result
+
+    def forward(self, x: Union[Tensor, List[Tensor]]) -> Dict[str, Tensor]:
+        # self.backboneNum = 1 -> x: tensor or [tensor] or [[tensor]]
+        # self.backboneNum > 1 -> x: [tensor, ..., tensor] or [[tensor], ..., [tensor]], len(x) == self.backboneNum
+        if isinstance(x, list):
+            if isinstance(x[0], list):
+                input_shape = x[0][0].shape[-2:]
+            else:
+                input_shape = x[0].shape[-2:]
+        else:
+            input_shape = x.shape[-2:]
+        # contract: features is a dict of tensors
+        features = self.forward_backborn(x)
+        result = self.forward_classifier(features)
+        return result
+
+def _classifier_resnet(
+    backbones: Union[ResNet, List[ResNet]],
+    num_classes: int
+) -> ResNetClassifier:
+    return_layers = {"layer4": "out"}
+    if not isinstance(backbones, list):
+        backbones = [backbones]
+    backbones = [IntermediateLayerGetter(backbone, return_layers=return_layers) for backbone in backbones]
+
+    classifier = FF(2048, num_classes)
+    return ResNetClassifier(backbones, classifier)
+
+
+def classifier_resnet50(
+    *,
+    progress: bool = True,
+    num_classes: Optional[int] = None,
+    weights_backbone: Optional[ResNet50_Weights] = ResNet50_Weights.IMAGENET1K_V1,
+    num_backbones: int = 1,
+    **kwargs: Any,
+)-> ResNetClassifier:
+    weights_backbone = ResNet50_Weights.verify(weights_backbone)
+    backbones = [resnet50(weights=weights_backbone, replace_stride_with_dilation=[False, True, True]) for _ in range(num_backbones)]
+    model = _classifier_resnet(backbones, num_classes)
+
+    return model
+
+
 def _deeplabv3_resnet(
-    backbone: ResNet,
+    backbones: Union[ResNet, List[ResNet]],
     num_classes: int,
-    aux: Optional[bool],
+    aux: Optional[bool]
 ) -> DeepLabV3:
     return_layers = {"layer4": "out"}
     if aux:
         return_layers["layer3"] = "aux"
-    backbone = IntermediateLayerGetter(backbone, return_layers=return_layers)
+    if not isinstance(backbones, list):
+        backbones = [backbones]
+    backbones = [IntermediateLayerGetter(backbone, return_layers=return_layers) for backbone in backbones]
 
     aux_classifier = FCNHead(1024, num_classes) if aux else None
     classifier = DeepLabHead(2048, num_classes)
     #classifier = SegHead(2048, num_classes)
-    return DeepLabV3(backbone, classifier, aux_classifier)
+    return DeepLabV3(backbones, classifier, aux_classifier)
 
 def deeplabv3_resnet50(
     *,
@@ -866,6 +1000,7 @@ def deeplabv3_resnet50(
     num_classes: Optional[int] = None,
     aux_loss: Optional[bool] = None,
     weights_backbone: Optional[ResNet50_Weights] = ResNet50_Weights.IMAGENET1K_V1,
+    num_backbones: int = 1,
     **kwargs: Any,
 ) -> DeepLabV3:
     """Constructs a DeepLabV3 model with a ResNet-50 backbone.
@@ -901,14 +1036,13 @@ def deeplabv3_resnet50(
     elif num_classes is None:
         num_classes = 21
 
-    backbone = resnet50(weights=weights_backbone, replace_stride_with_dilation=[False, True, True])
-    model = _deeplabv3_resnet(backbone, num_classes, aux_loss)
+    backbones = [resnet50(weights=weights_backbone, replace_stride_with_dilation=[False, True, True]) for _ in range(num_backbones)]
+    model = _deeplabv3_resnet(backbones, num_classes, aux_loss)
 
     if weights is not None:
         model.load_state_dict(weights.get_state_dict(progress=progress, check_hash=True))
 
     return model
-
 
 ############
 # mobile net
