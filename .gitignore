@@ -3,6 +3,7 @@
 *.csv
 *.pth
 *.npy
+*.npz
 *.png
 *.jpg
 *.tif
