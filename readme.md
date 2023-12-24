@@ -7,3 +7,6 @@
 ## Usage
 
 ## References
+
+## License
+MIT
