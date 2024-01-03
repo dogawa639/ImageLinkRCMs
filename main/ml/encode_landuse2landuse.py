@@ -24,8 +24,6 @@ if __name__ == "__main__":
     node_path = read_data["node_path"]  # csv
     link_path = read_data["link_path"]  # csv
     link_prop_path = read_data["link_prop_path"]  # csv
-    image_data_path = read_data["image_data_path"]  # json
-    image_data_dir = read_data["satellite_image_datadir"]  # dir
     onehot_data_path = read_data["onehot_data_path"]  # json
     onehot_data_dir = read_data["onehot_image_datadir"]  # dir
 
@@ -33,19 +31,20 @@ if __name__ == "__main__":
     model_dir = read_save["model_dir"]
     log_dir = read_save["log_dir"]
 
-    TRINING = False
+    TRINING = True
     TESTING = True
     EARLY_STOP = True
     SAVE_MODEL = True
 
-    case_name = "sat2lu_" + ("train" if TRINING else "") + ("test" if TESTING else "")
+    case_name = "lu2lu_" + ("train" if TRINING else "") + ("test" if TESTING else "")
 
-    image_data = load_json(image_data_path)
-    base_dirs_x = [os.path.join(image_data_dir, x["name"]) for x in image_data]
+    image_data = load_json(onehot_data_path)
+    base_dirs_x = [os.path.join(onehot_data_dir, x["name"]) for x in image_data]
     one_hot_data = load_json(onehot_data_path)
     base_dirs_h = [os.path.join(onehot_data_dir, x["name"]) for x in one_hot_data]
 
-    num_classes = 10  # class_num (including other class, class_num = 0)
+    num_classes = 12  # class_num (including other class, class_num = 0)
+    l1_coeff = 0.000
 
     kwargs = {"expansion": 2,
               "crop": True,
@@ -59,6 +58,11 @@ if __name__ == "__main__":
 
     xhimage_dataset = XHImageDataset(base_dirs_x, base_dirs_h, **kwargs)
     train_data, val_data, test_data = xhimage_dataset.split_into((0.1, 0.02, 0.02))
+    train_data_num = len(train_data)
+    val_data_num = len(val_data)
+    test_data_num = len(test_data)
+    print(f"train_data_num: {train_data_num}, val_data_num: {val_data_num}, test_data_num: {test_data_num}")
+
     train_dataloader = DataLoader(train_data, **loader_kwargs)
     val_dataloader = DataLoader(val_data, **loader_kwargs)
     test_dataloader = DataLoader(test_data, **loader_kwargs)
@@ -68,7 +72,8 @@ if __name__ == "__main__":
     loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
 
     logger = Logger(os.path.join(log_dir, f"{case_name}.json"), CONFIG)
-    model_path = os.path.join(model_dir, "sat2lu.pth")
+    model_path = os.path.join(model_dir, "lu2lu.pth")
+    img_shape = None  # (h,w)
     # train, val
     if TRINING:
         min_loss = np.inf
@@ -77,6 +82,7 @@ if __name__ == "__main__":
             t1 = time.perf_counter()
             model.train()
             tmp_loss = 0.0
+            tmp_loss_total = 0.0
             # data_tuple_x, data_tuple_h
             # data_tuple[i]: (img_tensor_x, transformed_x, mask_x, idx_x)
             for batch_x, batch_h in train_dataloader:
@@ -85,33 +91,48 @@ if __name__ == "__main__":
                 batch_x[2] = batch_x[2].to(device)
                 optimizer.zero_grad()
                 out = model(batch_x[1])["out"]  # (N, C, H, W)
-                loss = torch.sum(loss_fn(out, batch_h[1]) * batch_x[2])
+                out = out * batch_x[2].unsqueeze(1)
+                loss = loss_fn(out, batch_h[1])
                 l1_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
                 for w in model.parameters():
                     l1_loss = l1_loss + torch.sum(torch.abs(w))
-                loss_total = loss + 0.0001 / 2.0 ** epoch * l1_loss
+                loss_total = loss + l1_coeff / 2.0 ** epoch * l1_loss
                 loss_total.backward()
                 optimizer.step()
                 tmp_loss += loss.clone().cpu().detach().item()
-            train_loss = tmp_loss / len(train_dataloader)
+                tmp_loss_total += loss_total.clone().cpu().detach().item()
+            train_loss = tmp_loss / train_data_num
+            train_loss_total = tmp_loss_total / train_data_num
             logger.add_log("train_loss", train_loss)
+            logger.add_log("train_loss_total", train_loss_total)
 
             model.eval()
             tmp_loss = 0.0
+            tmp_loss_total = 0.0
             # (img_tensor_x, transformed_x, mask_x, idx_x)
             for batch_x, batch_h in val_dataloader:
                 batch_x[1] = batch_x[1].to(device)
                 batch_h[1] = batch_h[1].to(device)
                 batch_x[2] = batch_x[2].to(device)
                 out = model(batch_x[1])["out"]  # (N, C, H, W)
-                loss = torch.sum(loss_fn(out, batch_h[1]) * batch_x[2])
+                out = out * batch_x[2].unsqueeze(1)
+                loss = loss_fn(out, batch_h[1])
+                l1_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
+                for w in model.parameters():
+                    l1_loss = l1_loss + torch.sum(torch.abs(w))
+                loss_total = loss + l1_coeff / 2.0 ** epoch * l1_loss
                 tmp_loss += loss.clone().cpu().detach().item()
-            val_loss = tmp_loss / len(val_dataloader)
+                tmp_loss_total += loss_total.clone().cpu().detach().item()
+                if img_shape is None:
+                    img_shape = batch_x[1].shape[2:]
+            val_loss = tmp_loss / val_data_num
+            val_loss_total = tmp_loss_total / val_data_num
             logger.add_log("val_loss", val_loss)
+            logger.add_log("val_loss_total", val_loss_total)
 
             if EARLY_STOP:
-                if val_loss < min_loss:
-                    min_loss = val_loss
+                if val_loss_total < min_loss:
+                    min_loss = val_loss_total
                     if SAVE_MODEL:
                         torch.save(model.cpu().state_dict(), model_path)
                         logger.add_prop("model", model_path)
@@ -123,7 +144,7 @@ if __name__ == "__main__":
                     print("Early Stopping.")
                     break
             t2 = time.perf_counter()
-            print(f"epoch: {epoch}, train_loss: {train_loss}, val_loss: {val_loss}, time: {t2 - t1}")
+            print(f"epoch: {epoch}, train_loss: {train_loss / img_shape[0] / img_shape[1]}, val_loss: {val_loss / img_shape[0] / img_shape[1]}, time: {t2 - t1}")
         print(f"min_val_loss: {min_loss}")
 
     if TESTING:
@@ -160,7 +181,7 @@ if __name__ == "__main__":
         fig1.savefig(os.path.join(log_dir, f"{case_name}_original.png"))
         fig2.savefig(os.path.join(log_dir, f"{case_name}_predicted.png"))
         plt.show()
-        test_loss = tmp_loss / len(test_dataloader)
+        test_loss = tmp_loss / test_data_num
         print(f"test_loss: {test_loss}")
         logger.add_prop("test_loss", test_loss)
 

@@ -27,14 +27,14 @@ if __name__ == "__main__":
 
     if SATELLITE:
         output_data_path = os.path.splitext(image_data_path)[0] + "_processed.json"
-        image_data = SatelliteImageData(image_data_path, output_data_file=output_data_path)
+        image_data = SatelliteImageData(image_data_path, resolution=0.5, output_data_file=output_data_path)
         image_data.set_voronoi(nw_data)
         image_data.set_datafolder(image_data_dir, patch_size=128)
     if ONEHOT:
         output_data_path = os.path.splitext(onehot_data_path)[0] + "_processed.json"
-        image_data = OneHotImageData(onehot_data_path, output_data_file=output_data_path)
+        image_data = OneHotImageData(onehot_data_path, resolution=0.5, output_data_file=output_data_path)
         image_data.set_voronoi(nw_data)
         image_data.set_datafolder(onehot_data_dir, patch_size=128)
-        if LINKPROP:  # overwrite link_prop data with one-hot data
+        if LINKPROP:  # overwrite link_prop model with one-hot model
             print(f"Write link prop in {link_prop_path}.")
             image_data.write_link_prop(onehot_data_dir, link_prop_path)

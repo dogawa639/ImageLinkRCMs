@@ -79,12 +79,12 @@ class PP:
 
     def plot_path(self, trip_path, loc_path, trip_id=None, org_trip_id=None, trip_time_format="%Y-%m-%d %H:%M:%S", loc_time_format="%Y-%m-%d %H:%M:%S.%f"):
         # trip_id: ID
-        # trip_path: path of trip data
-        # loc_path: path of location data
+        # trip_path: path of trip model
+        # loc_path: path of location model
         if trip_id is None and org_trip_id is None:
             raise ValueError("trip_id or org_trip_id must be set.")
         if org_trip_id is not None and "org" not in self.data.columns:
-            raise ValueError("method requires original trip id in data.")
+            raise ValueError("method requires original trip id in model.")
 
         fig, ax = plt.subplots(dpi=300)
 
@@ -125,7 +125,7 @@ class PP:
     @staticmethod
     def get_path_dict(data, nw_data):
         # real_data: {"tid": {"path": [link_id], "d_node": node_id, "id": ID(, "org": org)}}
-        # data is soreted by time
+        # model is soreted by time
         trip_ids = sorted(data["ID"].unique())
         use_org = "org" in data.columns
         real_data = dict()
@@ -179,7 +179,7 @@ class PP:
         feeder_data["記録日時"] = np.vectorize(lambda x: datetime.datetime.strptime(x, feeder_time_format))(feeder_data["記録日時"].values)
         loc_data["記録日時"] = np.vectorize(lambda x: datetime.datetime.strptime(x, loc_time_format))(loc_data["記録日時"].values)
 
-        # loc data clipping by network
+        # loc model clipping by network
         node_list = list(nw_data.nodes.values())
         tree = KDTree(np.array([(node.x, node.y) for node in node_list]), leaf_size=2)
 

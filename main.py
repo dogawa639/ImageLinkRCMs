@@ -49,12 +49,12 @@ if __name__ == "__main__":
 
     ######  main  ######
 
-    # # load and process data
-    # image data
+    # # load and process model
+    # image model
     image_data = image.SatelliteImageData(data_path["image_data"])
-    # network data
+    # network model
     nw_data = network.NWData(data_path["nw_data"])
-    # pp data
+    # pp model
     pp_data = pp.PPData(data_path["pp_data"])
 
     # # learning

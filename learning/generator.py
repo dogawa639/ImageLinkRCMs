@@ -172,10 +172,10 @@ if __name__ == "__main__":
     from preprocessing.network import *
 
     device = "mps"
-    node_path = '/Users/dogawa/Desktop/bus/estimation/data/node.csv'
-    link_path = '/Users/dogawa/Desktop/bus/estimation/data/link.csv'
-    link_prop_path = '/Users/dogawa/Desktop/bus/estimation/data/link_attr_min.csv'
-    model_dir = "/Users/dogawa/PycharmProjects/GANs/trained_models"
+    node_path = '/Users/dogawa/Desktop/bus/estimation/model/node.csv'
+    link_path = '/Users/dogawa/Desktop/bus/estimation/model/link.csv'
+    link_prop_path = '/Users/dogawa/Desktop/bus/estimation/model/link_attr_min.csv'
+    model_dir = "/Users/dogawa/PycharmProjects/ImageLinkRCM/trained_models"
     bs = 10
     output_channel = 2
     emb_dim = 4

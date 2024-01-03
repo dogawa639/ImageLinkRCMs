@@ -24,13 +24,18 @@ if __name__ == "__main__":
     read_data = config["DATA"]
     node_path = read_data["node_path"]  # csv
     link_path = read_data["link_path"]  # csv
-    link_prop_path = "/Users/dogawa/Desktop/Git/GANs/debug/data/satellite_data/link_prop.csv"  # csv
     image_data_path = read_data["image_data_path"]  # json
     image_data_dir = read_data["satellite_image_datadir"]  # dir
     onehot_data_path = read_data["onehot_data_path"]  # json
     onehot_data_dir = read_data["onehot_image_datadir"]  # dir
     streetview_dir = read_data["streetview_dir"]  # dir
     streetview_data_path = read_data["streetview_data_path"]  # json
+
+    read_save = config["SAVE"]
+    debug_dir = read_save["debug_dir"]
+    log_dir = read_save["log_dir"]
+
+    link_prop_path = os.path.join(onehot_data_dir, "link_prop.csv")  # csv
 
     SAT2LU = False  # XHImageDataset
     ST2LU = False  # StreetViewDataset
@@ -44,7 +49,6 @@ if __name__ == "__main__":
     num_classes = 10  # class_num (including other class, class_num = -1)
 
     kwargs = {"expansion": 2,
-              "input_shape": (256, 256),
               "crop": True,
               "affine": True,
               "transform_coincide": True,
@@ -65,7 +69,7 @@ if __name__ == "__main__":
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
 
-        logger = Logger("/Users/dogawa/Desktop/Git/GANs/debug/log/sat2lu.json", CONFIG)
+        logger = Logger(os.path.join(log_dir, "sat2lu.json"), CONFIG)
         for epoch in range(3):
             model.train()
             tmp_loss = 0.0
@@ -106,7 +110,7 @@ if __name__ == "__main__":
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
 
-        logger = Logger("/Users/dogawa/Desktop/Git/GANs/debug/log/st2lu.json", CONFIG)
+        logger = Logger(os.path.join(log_dir, "st2lu.json"), CONFIG)
         for epoch in range(3):
             model.train()
             tmp_loss = 0.0
@@ -147,7 +151,7 @@ if __name__ == "__main__":
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
 
-        logger = Logger("/Users/dogawa/Desktop/Git/GANs/debug/log/satst2lu.json", CONFIG)
+        logger = Logger(os.path.join(log_dir, "satst2lu.json"), CONFIG)
         for epoch in range(3):
             model.train()
             tmp_loss = 0.0

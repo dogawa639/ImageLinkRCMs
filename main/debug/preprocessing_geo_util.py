@@ -11,8 +11,10 @@ if __name__ == "__main__":
     config.read(CONFIG, encoding="utf-8")
 
     read_data = config["DATA"]
+    org_image_dir = read_data["org_image_dir"]
     image_data_path = read_data["image_data_path"]
     image_data_list = load_json(image_data_path)
+    onehot_data_path = read_data["onehot_data_path"]
 
     MAPSEG = False
     GISSEG = True
@@ -20,7 +22,7 @@ if __name__ == "__main__":
     if MAPSEG:
         #print(image_data_list[1]["name"])
         #map_path = image_data_list[1]["path"]
-        map_path = "/Users/dogawa/Desktop/bus/aviational/data/ohsaka_avi_lum.png"
+        map_path = os.path.join(org_image_dir, "ohsaka_avi_lum.png")
 
         map_seg = MapSegmentation([map_path], max_class_num=3)
         png_data, one_hot = map_seg.convert_file(map_path)
@@ -30,7 +32,8 @@ if __name__ == "__main__":
         map_seg.write_hist()
 
     if GISSEG:
-        geo_path = "/Users/dogawa/Desktop/Data/Matsuyama/network/H25gis/C0302_土地利用_切り抜き.gpkg"
+        onehot_data = load_json(onehot_data_path)
+        geo_path = onehot_data[0]["geo_path"]
         gis_seg = GISSegmentation(geo_path, "土地利用CD", 4, 18, [227734, 227760], [104849, 104865])
         print(gis_seg.raster_file)
         gis_seg.write_colormap()

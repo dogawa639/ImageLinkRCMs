@@ -26,7 +26,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     from logger import Logger
 
-    CONFIG = "/Users/dogawa/PycharmProjects/GANs/config/config_test.ini"
+    CONFIG = "../../config/config_test.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
 
@@ -38,6 +38,9 @@ if __name__ == "__main__":
     link_path = read_data["link_path"]
     link_prop_path = read_data["link_prop_path"]
     pp_path = json.loads(read_data["pp_path"])
+
+    read_save = config["SAVE"]
+    debug_dir = read_save["debug_dir"]
 
     nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
 
@@ -51,8 +54,8 @@ if __name__ == "__main__":
     torch.use_deterministic_algorithms(True)
 
     z_test = True
-    interaction_estimation = False
-    v_ml_test = False
+    interaction_estimation = True
+    v_ml_test = True
 
     # x_ped = np.array([-1.16, 0.29, 0.02, -0.51, 0.27], dtype=np.float32)  # 0: length / 100, -2: angle, -1: mix_term
     # x_car = np.array([-0.36, -0.13, -0.04, -0.64, 0.73], dtype=np.float32)  # 0: length / 100, -2: angle, -1: mix_term
@@ -82,7 +85,7 @@ if __name__ == "__main__":
         u, s, vh = np.linalg.svd(np.eye(rl_ped.n, dtype=np.float32) - m2)
         print(s[0] / s[-1])
 
-        # write_2d_ndarray("/Users/dogawa/PycharmProjects/GANs/debug/data/m.txt", m)
+        # write_2d_ndarray(os.path.join(debug_dir, "model/m.txt"), m)
 
         fig = plt.figure()
         plt.scatter(z_true, z_pred)
@@ -236,9 +239,9 @@ if __name__ == "__main__":
         print(y, y2)
         print(x.shape, y.shape, y2.shape)
         errors = sum(errors, [])
-        # write_1d_array("/Users/dogawa/PycharmProjects/GANs/debug/data/y.txt", np.array(y.detach().cpu().numpy().flatten()))
-        # write_1d_array("/Users/dogawa/PycharmProjects/GANs/debug/data/y2.txt", np.array(y2.detach().cpu().numpy().flatten()))
-        # write_1d_array("/Users/dogawa/PycharmProjects/GANs/debug/data/errors.txt", np.array(errors))
+        # write_1d_array(os.path.join(debug_dir, "model/y.txt"), np.array(y.detach().cpu().numpy().flatten()))
+        # write_1d_array(os.path.join(debug_dir, "model/y2.txt"), np.array(y2.detach().cpu().numpy().flatten()))
+        # write_1d_array(os.path.join(debug_dir, "model/errors.txt"), np.array(errors))
         plt.hist(errors, bins=30)
         plt.xlabel("error")
         plt.show()

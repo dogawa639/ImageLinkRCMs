@@ -17,19 +17,19 @@ if __name__ == "__main__":
     link_path = read_data["link_path"]
     link_prop_path = read_data["link_prop_path"]
 
+    org_pp_dir = read_data["org_pp_dir"]
     pp_path = json.loads(read_data["pp_path"])
 
-    USEEXIST = True
+    USEEXIST = False
 
     nw_data = NetworkCNN(node_path, link_path, mode="ped")
 
-    pp_data_dir = "/Users/dogawa/Desktop/Data/Matsuyama/R4/R4松山ｰ新宿観光PP調査（PP調査データ）/"
     pp_df_walk = None
     pp_df_car = None
     tid_walk = 0
     tid_car = 0
     # perform map-matching for subtree of pp_data_dir
-    for root, dirs, files in os.walk(pp_data_dir):
+    for root, dirs, files in os.walk(org_pp_dir):
         if "t_loc_data.csv" in files and "t_locfeeder.csv" in files and "t_trip.csv" in files:
             loc_path = os.path.join(root, "t_loc_data.csv")
             feeder_path = os.path.join(root, "t_locfeeder.csv")

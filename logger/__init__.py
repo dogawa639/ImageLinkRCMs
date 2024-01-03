@@ -123,11 +123,11 @@ class Logger:
 
 # test
 if __name__ == "__main__":
-    logger = Logger("/Users/dogawa/Desktop/Git/GANs/debug/log_test.json", "")
+    logger = Logger("/Users/dogawa/Desktop/Git/ImageLinkRCM/debug/log_test.json", "")
     for i in range(10):
         logger.add_log("test", i)
         time.sleep(1)
     logger.close()
-    logger.save_fig("/Users/dogawa/Desktop/Git/GANs/debug/data/log_test.png")
+    logger.save_fig("/Users/dogawa/Desktop/Git/ImageLinkRCM/debug/model/log_test.png")
 
 

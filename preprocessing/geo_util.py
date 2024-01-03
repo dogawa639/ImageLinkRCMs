@@ -45,9 +45,9 @@ class MapSegmentation:
         self.max_class_num = max_class_num  # containing other class
         self._load_color_dict() # self.color_dict, self.pixel_count  key: color_id
         self._sort_color()  # self.color_list  sorted bu color pixel count, [0]: majour class
-        self.class_num = len(self.color_dict) + 1  # 1: other (class_num = -1)
+        self.class_num = len(self.color_dict) + 1  # 1: other (class_num = 0)
 
-    def convert_file(self, file, png_file=None, np_file=None):
+    def convert_file(self, file, png_file=None, np_file=None, vis_file=None):
         # return: (class_num, H, W) ndarray
         input_image = Image.open(file)
         input_image = input_image.convert("RGB")  # (H, W, 3)
@@ -60,13 +60,13 @@ class MapSegmentation:
         class_num = min(self.class_num, self.max_class_num)
         if class_num > 255:
             raise ValueError("class_num should be less than 255")
-        color_dict_small = {k: v for i, (k, v) in enumerate(self.color_dict.items()) if i < class_num - 1}
+        color_dict_small = {k: v for i, (k, v) in enumerate(self.color_dict.items()) if i < class_num - 1}  # key: color_id, value: class_num(>=1)
 
         def get_idx(cid):
             if cid in color_dict_small:
                 return color_dict_small[cid]
             else:
-                return class_num - 1  # other class
+                return 0  # other class
         idxs = np.vectorize(get_idx)(input_image).reshape(h, w)
 
         png_data = np.zeros((h, w), dtype=np.uint8)   # (H, W)
@@ -80,19 +80,32 @@ class MapSegmentation:
             img.save(png_file)
         if np_file is not None:
             np.save(np_file, one_hot)
+        if vis_file is not None:
+            vis_data = png_data.astype(float)
+            vis_data = vis_data / (class_num - 1) * 255
+            vis_data = vis_data.astype(np.uint8)
+            img = Image.fromarray(vis_data)
+            img.save(vis_file)
         return png_data, one_hot
 
     # visualization
     def write_colormap(self, file=None):
         class_num = min(self.class_num, self.max_class_num)
 
-        fig = plt.figure(dpi=15, figsize=(1, class_num))
+        fig = plt.figure(dpi=15, figsize=(2, class_num))
         for i in range(class_num - 1):
-            ax = fig.add_subplot(class_num, 1, i+1)
-            rgb = MapSegmentation.get_rgb_from_id(self.color_list[i])
+            rgb = [i + 1] * 3
+            ax = fig.add_subplot(class_num, 2, i*2+1)
             ax.imshow(np.array([[rgb]], dtype=np.uint8))
             ax.axis("off")
-        ax = fig.add_subplot(class_num, 1, class_num)
+            rgb = [int((i + 1) / class_num * 255.)] * 3
+            ax = fig.add_subplot(class_num, 2, i * 2 + 2)
+            ax.imshow(np.array([[rgb]], dtype=np.uint8))
+            ax.axis("off")
+        ax = fig.add_subplot(class_num, 2, class_num*2-1)
+        ax.imshow(np.zeros((1, 1, 3), dtype=np.uint8))
+        ax.axis("off")
+        ax = fig.add_subplot(class_num, 2, class_num*2)
         ax.imshow(np.zeros((1, 1, 3), dtype=np.uint8))
         ax.axis("off")
         if file is not None:
@@ -133,16 +146,16 @@ class MapSegmentation:
                 if color in color_dict:
                     pixel_count[color] += counts[i]
                 else:
-                    color_dict[color] = len(color_dict)
+                    color_dict[color] = len(color_dict) + 1
                     pixel_count[color] = counts[i]
 
-        self.color_dict = color_dict
+        self.color_dict = color_dict  # key: color_id, value: class_num
         self.pixel_count = pixel_count
 
     def _sort_color(self):
         pixel_count_sorted = sorted(self.pixel_count.items(), key=lambda x: x[1], reverse=True)
         self.color_list = [x[0] for x in pixel_count_sorted]
-        self.color_dict = {k: i for i, k in enumerate(self.color_list)}
+        self.color_dict = {k: i+1 for i, k in enumerate(self.color_list)}
         self.pixel_count = {k: self.pixel_count[k] for k in self.color_list}
 
     @staticmethod
@@ -150,17 +163,10 @@ class MapSegmentation:
         # rgb: (r, g, b)
         return np.array(r, dtype=int) * (256 ** 2) + np.array(g, dtype=int) * 256 + np.array(b, dtype=int)
 
-    @staticmethod
-    def get_rgb_from_id(color_id):
-        r = color_id // (256 ** 2)
-        g = (color_id - r * 256 ** 2) // 256
-        b = color_id % 256
-        return r, g, b
-
 
 class GISSegmentation(MapSegmentation):
-    # segmentation of GIS data
-    def __init__(self, file, prop, utm_num, z, xs, ys, bbox=None, max_class_num=10):
+    # segmentation of GIS model
+    def __init__(self, file, prop, utm_num, z, xs, ys, resolution=None, bbox=None, max_class_num=10):
         # bbox: [min_lon, min_lat, max_lon, max_lat]
         self.file = file
         self.prop = prop
@@ -168,6 +174,7 @@ class GISSegmentation(MapSegmentation):
         self.coord = Coord(utm_num)
         self.xs = xs
         self.ys = ys
+        self.resolution = resolution
         self.bbox = bbox
         self.max_class_num = max_class_num  # containing other class
 
@@ -185,7 +192,7 @@ class GISSegmentation(MapSegmentation):
         self.mask = gpd.GeoSeries([polygon], crs="EPSG:4326")
 
         self.raster_file = os.path.splitext(file)[0] + ".tif"
-        self.prop2cid = self.gis2tif(file, prop, self.raster_file, utm_num, tif_range=(x_min, y_min, x_max, y_max), mask=self.mask)
+        self.prop2cid = self.gis2tif(file, prop, self.raster_file, utm_num, tif_range=(x_min, y_min, x_max, y_max), mask=self.mask, resolution=resolution)
 
         super().__init__([self.raster_file], max_class_num)
         self.write_color_info()
@@ -204,7 +211,7 @@ class GISSegmentation(MapSegmentation):
         df.to_csv(os.path.splitext(self.file)[0] + "_color.csv", index=False)
 
     @staticmethod
-    def gis2tif(file, prop, out_file, utm_num, tif_range=None, mask=None, bbox=None, resolution=0.5):
+    def gis2tif(file, prop, out_file, utm_num, tif_range=None, mask=None, bbox=None, resolution=None):
         # tif_range [min_lon, min_lat, max_lon, max_lat]
         # bbox: [min_lon, min_lat, max_lon, max_lat]
         gdf = gpd.read_file(file, mask=mask, bbox=bbox, crs="EPSG:4326")
@@ -214,6 +221,8 @@ class GISSegmentation(MapSegmentation):
 
         if tif_range is None:
             tif_range = gdf["geometry"].total_bounds
+        if resolution is None:
+            resolution = 0.5
         dx = tif_range[2] - tif_range[0]
         dy = tif_range[3] - tif_range[1]
         shape = int(dx / resolution), int(dy / resolution)

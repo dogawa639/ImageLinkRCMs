@@ -130,6 +130,21 @@ class Coord:
     def from_utm(self, x, y):
         wgs_point = transform(self.project_from_utm, Point(x, y))
         return (wgs_point.x, wgs_point.y)
+
+
+class KalmanFilter:
+    def __init__(self, f, p, h):
+        # f: 状態遷移行列
+        # p: 誤差共分散行列
+        # h: 観測行列
+
+        # x: 状態ベクトル dim_x
+        # z: 観測ベクトル dim_z
+        self.f = f  # (dim_x, dim_x)
+        self.p = p  # (dim_x, dim_x)
+        self.h = h  # (dim_z, dim_x)
+
+
     
 
 

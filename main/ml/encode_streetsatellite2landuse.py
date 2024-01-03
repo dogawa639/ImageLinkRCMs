@@ -38,7 +38,7 @@ if __name__ == "__main__":
     model_dir = read_save["model_dir"]
     log_dir = read_save["log_dir"]
 
-    TRINING = True
+    TRINING = False
     TESTING = True
     EARLY_STOP = True
     SAVE_MODEL = True
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     one_hot_data = load_json(onehot_data_path)
     base_dirs_h = [os.path.join(onehot_data_dir, x["name"]) for x in one_hot_data]
 
-    num_classes = 10  # class_num (including other class, class_num = -1)
+    num_classes = 10  # class_num (including other class, class_num = 0)
 
     kwargs = {"expansion": 2,
               "crop": True,
@@ -82,7 +82,7 @@ if __name__ == "__main__":
         # train, val
         min_loss = np.inf
         stop_count = 0
-        for epoch in range(100):
+        for epoch in range(500):
             t1 = time.perf_counter()
             model.train()
             tmp_loss = 0.0
@@ -129,7 +129,7 @@ if __name__ == "__main__":
                     stop_count = 0
                 else:
                     stop_count += 1
-                if stop_count >= 5:
+                if stop_count >= 10:
                     break
             t2 = time.perf_counter()
             print(f"epoch: {epoch}, train_loss: {train_loss}, val_loss: {val_loss}, time: {t2 - t1}")

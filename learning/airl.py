@@ -326,14 +326,14 @@ if __name__ == "__main__":
     from preprocessing.image import *
     from preprocessing.dataset import *
 
-    CONFIG = "/Users/dogawa/PycharmProjects/GANs/config/config_test.ini"
+    CONFIG = "/Users/dogawa/PycharmProjects/ImageLinkRCM/config/config_test.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
     # general
     read_general = config["GENERAL"]
     model_type = read_general["model_type"]  # cnn or gnn
     device = read_general["device"]
-    # data
+    # model
     read_data = config["DATA"]
     node_path = read_data["node_path"]
     link_path = read_data["link_path"]
@@ -374,8 +374,8 @@ if __name__ == "__main__":
     # save setting
     read_save = config["SAVE"]
     model_dir = read_save["model_dir"]
-    image_file = read_save["image_file"]  # str or None
-    image_file = None if image_file == "null" else image_file
+    fig_dir = read_save["figure_dir"]
+    image_file = os.path.join(fig_dir, "train.png")
 
     # instance creation
     use_index = (model_type == "cnn")

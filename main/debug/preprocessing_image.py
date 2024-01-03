@@ -27,11 +27,11 @@ if __name__ == "__main__":
     nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
 
     if SATELLITE:
-        image_data = SatelliteImageData(image_data_path, output_data_file="/Users/dogawa/Desktop/Git/GANs/debug/data/satellite_data/satellite_image.json")
+        image_data = SatelliteImageData(image_data_path, resolution=0.5, output_data_file=os.path.join(image_data_dir, "satellite_image.json"))
         image_data.set_voronoi(nw_data)
         image_data.set_datafolder(image_data_dir)
     if ONEHOT:
-        image_data = OneHotImageData(onehot_data_path, output_data_file="/Users/dogawa/Desktop/Git/GANs/debug/data/satellite_data/onehot_image.json")
+        image_data = OneHotImageData(onehot_data_path, resolution=0.5, output_data_file=os.path.join(onehot_data_dir, "onehot_image.json"))
         image_data.set_voronoi(nw_data)
         image_data.set_datafolder(onehot_data_dir)
         image_data.write_link_prop(onehot_data_dir, os.path.join(onehot_data_dir, "link_prop.csv"))

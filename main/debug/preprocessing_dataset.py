@@ -12,7 +12,8 @@ if __name__ == "__main__":
     config.read(CONFIG, encoding="utf-8")
 
     read_data = config["DATA"]
-    link_prop_path = "/Users/dogawa/Desktop/Git/GANs/debug/data/satellite_data/link_prop.csv"
+    image_data_dir = read_data["satellite_image_datadir"]
+    link_prop_path = os.path.join(image_data_dir, "link_prop.csv")
     image_data_path = read_data["image_data_path"]  # [{"name", "path", "z", "x", "y", "utm_num"}]
     image_data_dir = read_data["satellite_image_datadir"]
     onehot_data_path = read_data["onehot_data_path"]
@@ -47,7 +48,6 @@ if __name__ == "__main__":
 
     kwargs = {"corresponds": False,
               "expansion": 2,
-              "input_shape": (256, 256),
               "crop":True,
               "affine": True,
               "transform_coincide": True,

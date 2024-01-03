@@ -292,7 +292,7 @@ if __name__ == "__main__":
 
     device = "mps"
 
-    CONFIG = "/Users/dogawa/PycharmProjects/GANs/config/config_all.ini"
+    CONFIG = "/Users/dogawa/PycharmProjects/ImageLinkRCM/config/config_all.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
 
@@ -343,7 +343,7 @@ if __name__ == "__main__":
         u, s, vh = np.linalg.svd(np.eye(rl_ped.n, dtype=np.float32) - m2)
         print(s[0] / s[-1])
 
-        # write_2d_ndarray("/Users/dogawa/PycharmProjects/GANs/debug/data/m.txt", m)
+        # write_2d_ndarray("/Users/dogawa/PycharmProjects/ImageLinkRCM/debug/model/m.txt", m)
 
         fig = plt.figure()
         plt.scatter(z_true, z_pred)
@@ -496,9 +496,9 @@ if __name__ == "__main__":
         print(y, y2)
         print(x.shape, y.shape, y2.shape)
         errors = sum(errors, [])
-        # write_1d_array("/Users/dogawa/PycharmProjects/GANs/debug/data/y.txt", np.array(y.detach().cpu().numpy().flatten()))
-        # write_1d_array("/Users/dogawa/PycharmProjects/GANs/debug/data/y2.txt", np.array(y2.detach().cpu().numpy().flatten()))
-        # write_1d_array("/Users/dogawa/PycharmProjects/GANs/debug/data/errors.txt", np.array(errors))
+        # write_1d_array("/Users/dogawa/PycharmProjects/ImageLinkRCM/debug/model/y.txt", np.array(y.detach().cpu().numpy().flatten()))
+        # write_1d_array("/Users/dogawa/PycharmProjects/ImageLinkRCM/debug/model/y2.txt", np.array(y2.detach().cpu().numpy().flatten()))
+        # write_1d_array("/Users/dogawa/PycharmProjects/ImageLinkRCM/debug/model/errors.txt", np.array(errors))
         plt.hist(errors, bins=30)
         plt.xlabel("error")
         plt.show()

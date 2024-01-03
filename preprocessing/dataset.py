@@ -216,7 +216,7 @@ class PPEmbedDataset(Dataset):
 
 
 class PatchDataset(Dataset):
-    # all data are preloaded
+    # all model are preloaded
     def __init__(self, patches):
         # patches: [(C, H, W)]
         self.patches = patches
@@ -390,7 +390,7 @@ class ImageDatasetBase(Dataset):
         return idx
 
 class XImageDataset(ImageDatasetBase):
-    # data structure:
+    # model structure:
     #     if corresponds  base_dir/**/*.png for base_dir in base_dirs (**, * are the same)
     #     else:
     #         base_dir/**/*.png
@@ -420,7 +420,7 @@ class XImageDataset(ImageDatasetBase):
         for i in range(len(self.files)):
             img_tensor = self.preprocess(Image.open(self.files[i][item]))  # (C, H, W)
 
-            if i == 0:  # same transformation for all data
+            if i == 0:  # same transformation for all model
                 params = self.get_transform_params(img_tensor)
             transformed, mask, idx = self.transform_by_params(img_tensor, *params)
             data_list.append((img_tensor, transformed, mask, idx))
@@ -695,7 +695,7 @@ class StreetViewDataset(ImageDatasetBase):
                 img_tensor = torch.zeros((3, *self.input_shape), dtype=torch.float32)
             else:
                 img_tensor = self.preprocess(Image.open(self.files[item][i]))  # (C, H, W)
-            if i == 0:  # same transformation for all data
+            if i == 0:  # same transformation for all model
                 params = self.get_transform_params(img_tensor)
             transformed, mask, idx = self.transform_by_params(img_tensor, *params)
             data_list.append((img_tensor, transformed, mask, idx))
@@ -764,7 +764,7 @@ class StreetViewXDataset(StreetViewDataset):
                 img_tensor_x = self.preprocess(Image.open(tmp_path))
             else:
                 img_tensor_x = torch.zeros((3, *self.input_shapes[i+1]), dtype=torch.float32)
-            if i == 0:  # same transformation for all data
+            if i == 0:  # same transformation for all model
                 params = self.get_transform_params(img_tensor_x)
             transformed_x, mask_x, idx_x = self.transform_by_params(img_tensor_x, *params)
             data_list_x.append((img_tensor_x, transformed_x, mask_x, idx_x))
@@ -942,7 +942,7 @@ class ImageDataset(Dataset):
         self.output_tensors = output_tensors
 
     def _split_data(self, num_sample=200):
-        # split data into some pices with shape (3, H, W)
+        # split model into some pices with shape (3, H, W)
         input_shape = self.input_shape
 
         cropped_tensor = torch.tensor(np.zeros((num_sample * len(self.input_tensors), 3, input_shape[0], input_shape[1]), dtype=np.float32))

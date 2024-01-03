@@ -133,7 +133,7 @@ class _SimpleSegmentationModel(nn.Module):
         # contract: features is a dict of tensors
         features = self.forward_backborn(x)
         result = self.forward_classifier(features, input_shape)
-        result["out"] = self.final_classifier(torch.cat([x, result["out"]], dim=1))
+        #result["out"] = self.final_classifier(torch.cat([x, result["out"]], dim=1))
         return result
     
 
@@ -163,7 +163,7 @@ class DeepLabHead(nn.Sequential):
             nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.Conv2d(256, num_classes, 1),
-            nn.Softmax2d()
+            #nn.Softmax2d()
         )
         self.num_classes = num_classes
 
@@ -171,7 +171,7 @@ class SegHead(nn.Sequential):
     def __init__(self, in_channels: int, num_classes: int) -> None:
         super().__init__(
             nn.Conv2d(in_channels, num_classes, 1, padding=1, bias=False),
-            nn.Softmax2d()
+            #nn.Softmax2d()
         )
         self.num_classes = num_classes
 
@@ -332,7 +332,7 @@ class WeightsEnum(Enum):
     `Weights`.
 
     Args:
-        value (Weights): The data class entry with the weight information.
+        value (Weights): The model class entry with the weight information.
     """
 
     @classmethod
@@ -375,10 +375,10 @@ class Weights:
             needed to use the model. The reason we attach a constructor method rather than an already constructed
             object is because the specific object might have memory and thus we want to delay initialization until
             needed.
-        meta (Dict[str, Any]): Stores meta-data related to the weights of the model and its configuration. These can be
+        meta (Dict[str, Any]): Stores meta-model related to the weights of the model and its configuration. These can be
             informative attributes (for example the number of parameters/flops, recipe link/methods used in training
             etc), configuration parameters (for example the `num_classes`) needed to construct the model or important
-            meta-data (for example the `classes` of a classification model) needed to use the model.
+            meta-model (for example the `classes` of a classification model) needed to use the model.
     """
 
     url: str

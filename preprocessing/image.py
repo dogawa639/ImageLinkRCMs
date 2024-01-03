@@ -27,11 +27,11 @@ __all__ = ["SatelliteImageData", "OneHotImageData"]
 
 # 画像データの読み込み，座標付与
 class SatelliteImageData:
-    # currently only the same utm_num for all data is allowed.
+    # currently only the same utm_num for all model is allowed.
     required_prop = ["name", "path", "z", "x", "y", "utm_num"]
     def __init__(self, data_file, resolution=None, output_data_file=None, output_mask_file=None):
         # data_file: json [{"name": name, "path": path, "z":z, "x": [x_min, x_max], "y": [y_min, y_max], "utm_num": utm_num}]
-        # (x_max and y_max are not included in data.)
+        # (x_max and y_max are not included in model.)
         # initial transformation: coordinate calculation (coords, bounds), resolution calculation (resolution)
         # visualization: gtif
         # note: Image.open(path) returns RGB (H, W, 3) or gray (H, W)
@@ -40,13 +40,17 @@ class SatelliteImageData:
         self.resolution = resolution  # m / pixel
         self.output_data_file = output_data_file
         self.output_mask_file = output_mask_file
+        utm_num = None
         for data in self.data_list:
             for prop in SatelliteImageData.required_prop:
                 if prop not in data:
-                    print(f"property {prop} is not in the data")
+                    print(f"property {prop} is not in the model")
                     return
+            if utm_num is not None and utm_num != data["utm_num"]:
+                print("utm_num should be the same for all model.")
+                return
 
-        self._get_xy()  # coords [(x, y)] (north west, south west, south east, north east), bounds
+        self._get_xy()  # coords [(x, y)] (north west, south west, south east, north east), bounds [x or y] (west, south, east, north)
         self._get_tif()  # replace path with gtif
         self._clip_shared()  # replace path with clipped gtif, update (coords, bounds)
         self._set_resolution()  # resolution
@@ -62,14 +66,11 @@ class SatelliteImageData:
 
         # cv2 subdiv for each image
         for data in self.data_list:
+            with rasterio.open(data["path"]) as src:
+                profile = src.profile
+            transformation = profile["transform"]
             image = np.array(Image.open(data["path"]))  # RGB (H, W, 3) or gray (H, W)
             h, w = image.shape[:2]
-            coords = np.array(data["coords"])
-            west = coords[:, 0].min()
-            east = coords[:, 0].max()
-            north = coords[:, 1].max()
-            south = coords[:, 1].min()
-            transformation = rasterio.transform.from_bounds(west, south, east, north, w, h)
 
             center_idxs = [rasterio.transform.rowcol(transformation, x, y) for x,y in center_points]  # row, col
 
@@ -85,10 +86,15 @@ class SatelliteImageData:
                 color = SatelliteImageData.get_rbg_from_number(undir_ids[i])  # rgb
                 color = (color[2], color[1], color[0])  # bgr
                 cv2.fillConvexPoly(imgv, p, color)
+            imgv = cv2.cvtColor(imgv, cv2.COLOR_BGR2RGB)
             basename, ext = os.path.splitext(data["path"])
-            voronoi_path = basename + "_voronoi.png"
+            voronoi_path = basename + "_voronoi.tif"
             data["voronoi_path"] = voronoi_path
-            cv2.imwrite(voronoi_path, imgv)
+            profile["count"] = 3
+            with rasterio.open(voronoi_path, "w", **profile) as dst:
+                dst.write(imgv[:, :, 0], indexes=1)
+                dst.write(imgv[:, :, 1], indexes=2)
+                dst.write(imgv[:, :, 2], indexes=3)
 
             # mask of convex hull
             node_idxs = [rasterio.transform.rowcol(transformation, x, y) for x,y in nodes]
@@ -99,9 +105,11 @@ class SatelliteImageData:
             convex_hull_mask = np.zeros((h, w), dtype=np.uint8)
             cv2.fillConvexPoly(convex_hull_mask, convex_hull, 255)
             basename, ext = os.path.splitext(data["path"])
-            convex_hull_path = basename + "_convex_hull.png"
+            convex_hull_path = basename + "_convex_hull.tif"
             data["convex_hull_path"] = convex_hull_path
-            cv2.imwrite(convex_hull_path, convex_hull_mask)
+            profile["count"] = 1
+            with rasterio.open(convex_hull_path, "w", **profile) as dst:
+                dst.write(convex_hull_mask, indexes=1)
         self._output_data_file()
 
     def load_images(self):
@@ -318,12 +326,16 @@ class SatelliteImageData:
                 dst.write(image[:, :, 1], indexes=2)
                 dst.write(image[:, :, 2], indexes=3)
             self.data_list[i]["path"] = new_path
+            coords, bounds = SatelliteImageData.get_gtif_coord(new_path)
+            self.data_list[i]["coords"] = coords
+            self.data_list[i]["bounds"] = bounds
         self._output_data_file()
 
     def _clip_shared(self):
         # bounds: [west, south, east, north]
         bounds = None
         for data in self.data_list:
+            # get shared bounds of all model
             if bounds is None:
                 bounds = list(data["bounds"])
             else:
@@ -354,6 +366,7 @@ class SatelliteImageData:
             ) as dst:
                 for j in range(c):
                     dst.write(masked[j, :, :], indexes=j+1)
+            coords, bounds = SatelliteImageData.get_gtif_coord(new_path)
             self.data_list[i]["path"] = new_path
             self.data_list[i]["coords"] = coords
             self.data_list[i]["bounds"] = bounds
@@ -361,7 +374,7 @@ class SatelliteImageData:
 
     def _set_resolution(self):
         # overwrite the tif
-        if self.resolution is None:  # set the highest resolution in the data
+        if self.resolution is None:  # set the highest resolution in the model
             for i in range(len(self.data_list)):
                 img = Image.open(self.data_list[i]["path"])
                 w, h = img.size
@@ -397,6 +410,9 @@ class SatelliteImageData:
                 for j in range(c):
                     dst.write(upsampled[j, :, :], indexes=j+1)
             self.data_list[i]["resolution"] = self.resolution
+            coords, bounds = SatelliteImageData.get_gtif_coord(data["path"])
+            self.data_list[i]["coords"] = coords
+            self.data_list[i]["bounds"] = bounds
 
         self._output_data_file()
 
@@ -457,12 +473,19 @@ class SatelliteImageData:
                 for i in range(c):
                     dst.write(img[:, :, i], indexes=i+1)
 
+    @staticmethod
+    def get_gtif_coord(image_path):
+        with rasterio.open(image_path) as src:
+            bounds = src.bounds  # left, bottom, right, top
+            bounds = list(bounds)
+            coords = [(bounds[0], bounds[3]), (bounds[0], bounds[1]), (bounds[2], bounds[1]), (bounds[2], bounds[3])]   # north west, south west, south east, north east
+        return coords, bounds
 
 class OneHotImageData(SatelliteImageData):
     required_prop = ["name", "geo_path", "z", "x", "y", "utm_num"]
     def __init__(self, data_file, max_class_num=10, resolution=None, output_data_file=None, output_mask_file=None):
         # data_file: json [{"name": name, "geo_path": geo_path, "prop", "z":z, "x": [x_min, x_max], "y": [y_min, y_max], "utm_num": utm_num}]
-        # (x_max and y_max are not included in data.)
+        # (x_max and y_max are not included in model.)
         # path: png or geo file
         # initial transformation: coordinate calculation (coords, bounds), resolution calculation (resolution)
         # note: Image.open(path) returns RGB (H, W, 3)
@@ -475,7 +498,7 @@ class OneHotImageData(SatelliteImageData):
         for data in self.data_list:
             for prop in OneHotImageData.required_prop:
                 if prop not in data:
-                    print(f"property {prop} is not in the data")
+                    print(f"property {prop} is not in the model")
                     return
 
         self._get_xy()  # coords, bounds
@@ -504,8 +527,10 @@ class OneHotImageData(SatelliteImageData):
                 patch.save(path_org)
 
                 path = os.path.join(tmp_dir, f"{self.nw_data.lids_all[j]}.png")
-                path_onehot = os.path.join(tmp_dir, f"{self.nw_data.lids_all[j]}_onehot.npy")
-                self.gis_segs[i].convert_file(path_org, png_file=path, np_file=path_onehot)
+                path_onehot = None#os.path.join(tmp_dir, f"{self.nw_data.lids_all[j]}_onehot.npy")
+                path_vis = os.path.join(tmp_dir, f"{self.nw_data.lids_all[j]}_vis.png")
+                self.gis_segs[i].convert_file(path_org, png_file=path, np_file=path_onehot, vis_file=path_vis)
+                self.gis_segs[i].write_color_info()
 
         self._output_data_file()
 
@@ -533,10 +558,13 @@ class OneHotImageData(SatelliteImageData):
     def _transform2image(self):
         self.gis_segs = []
         for i, data in enumerate(self.data_list):
-            gis_seg = GISSegmentation(data["geo_path"], data["prop"], data["utm_num"], data["z"], data["x"], data["y"], max_class_num=self.max_class_num)
+            gis_seg = GISSegmentation(data["geo_path"], data["prop"], data["utm_num"], data["z"], data["x"], data["y"], max_class_num=self.max_class_num, resolution=self.resolution)
             self.gis_segs.append(gis_seg)
             tif_path = gis_seg.raster_file
             self.data_list[i]["path"] = tif_path
+            coords, bounds = SatelliteImageData.get_gtif_coord(tif_path)
+            self.data_list[i]["coords"] = coords
+            self.data_list[i]["bounds"] = bounds
 
         self._output_data_file()
 
