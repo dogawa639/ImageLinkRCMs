@@ -4,7 +4,7 @@ if __name__ == "__main__":
     import json
 
     from preprocessing.geo_util import *
-    from utility import *
+    from utility_kalmanfilter import *
 
     CONFIG = "../../config/config_test.ini"
     config = configparser.ConfigParser()

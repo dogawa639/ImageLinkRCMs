@@ -31,7 +31,7 @@ if __name__ == "__main__":
     model_dir = read_save["model_dir"]
     log_dir = read_save["log_dir"]
 
-    TRINING = True
+    TRINING = False
     TESTING = True
     EARLY_STOP = True
     SAVE_MODEL = True
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     base_dirs_h = [os.path.join(onehot_data_dir, x["name"]) for x in one_hot_data]
 
     num_classes = 12  # class_num (including other class, class_num = 0)
-    l1_coeff = 0.000
+    l1_coeff = 0.001
 
     kwargs = {"expansion": 2,
               "crop": True,
@@ -95,8 +95,8 @@ if __name__ == "__main__":
                 loss = loss_fn(out, batch_h[1])
                 l1_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
                 for w in model.parameters():
-                    l1_loss = l1_loss + torch.sum(torch.abs(w))
-                loss_total = loss + l1_coeff / 2.0 ** epoch * l1_loss
+                    l1_loss = l1_loss + torch.sum(torch.square(w))
+                loss_total = loss + l1_coeff / 1.0 ** epoch * l1_loss
                 loss_total.backward()
                 optimizer.step()
                 tmp_loss += loss.clone().cpu().detach().item()
@@ -119,8 +119,8 @@ if __name__ == "__main__":
                 loss = loss_fn(out, batch_h[1])
                 l1_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
                 for w in model.parameters():
-                    l1_loss = l1_loss + torch.sum(torch.abs(w))
-                loss_total = loss + l1_coeff / 2.0 ** epoch * l1_loss
+                    l1_loss = l1_loss + torch.sum(torch.square(w))
+                loss_total = loss + l1_coeff / 1.0 ** epoch * l1_loss
                 tmp_loss += loss.clone().cpu().detach().item()
                 tmp_loss_total += loss_total.clone().cpu().detach().item()
                 if img_shape is None:
@@ -140,7 +140,7 @@ if __name__ == "__main__":
                     stop_count = 0
                 else:
                     stop_count += 1
-                if stop_count >= 10:
+                if epoch > 20 and stop_count >= 10:
                     print("Early Stopping.")
                     break
             t2 = time.perf_counter()

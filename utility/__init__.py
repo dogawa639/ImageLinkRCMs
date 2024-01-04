@@ -13,7 +13,7 @@ import pyproj
 
 from PIL import Image
 
-__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv", "Coord"]
+__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv", "Coord", "KalmanFilter"]
 
 
 def load_json(file):
@@ -133,16 +133,135 @@ class Coord:
 
 
 class KalmanFilter:
-    def __init__(self, f, p, h):
+    def __init__(self, f, h, q_fn, r_fn, g=None):
         # f: 状態遷移行列
-        # p: 誤差共分散行列
         # h: 観測行列
+        # q_fn: プロセスノイズの共分散行列を返す関数
+        # r_fn: 観測ノイズの共分散行列を返す関数
+        # g: 入力行列
 
-        # x: 状態ベクトル dim_x
-        # z: 観測ベクトル dim_z
+        # x: 状態ベクトル (dim_x, num_obj)
+        # z: 観測ベクトル (dim_z, num_obj)
+        self.dim_x = f.shape[0]
+        self.dim_z = h.shape[0]
+        self.dim_u = g.shape[1] if g is not None else 0
         self.f = f  # (dim_x, dim_x)
-        self.p = p  # (dim_x, dim_x)
         self.h = h  # (dim_z, dim_x)
+        self.q_fn = q_fn  # (dim_x, dim_x), x->cov
+        self.r_fn = r_fn  # (dim_z, dim_z), z->cov
+        self.g = g  # (dim_x, dim_u)
+
+        if self.f.shape != (self.dim_x, self.dim_x):
+            raise Exception("f shape error")
+        if self.h.shape != (self.dim_z, self.dim_x):
+            raise Exception("h shape error")
+        if self.g is not None and self.g.shape != (self.dim_x, self.dim_u):
+            raise Exception("g shape error")
+
+        self.xnn = None  # (num_obj, dim_x)
+        self.pnn = None  # (num_obj, dim_x, dim_x)
+        self.x_nnm1 = None  # (num_obj, dim_x)
+        self.p_nnm1 = None  # (num_obj, dim_x, dim_x)
+        self.active_idx = None  # (num_obj), bool
+
+    def add_obj(self, z):
+        # initilize x, p
+        # z: (num_obj, dim_z)
+        num_obj = z.shape[0]
+        x00s = np.zeros((num_obj, self.dim_x), dtype=np.float32)
+        p00s = np.zeros((num_obj, self.dim_x, self.dim_x), dtype=np.float32)
+        for i in range(num_obj):
+            r = self.r_fn(z[i])  # (dim_z, dim_z)
+            hphr_inv = np.linalg.pinv(np.dot(self.h, self.h.T) + r)
+            k = np.dot(self.h.T, hphr_inv)  # (dim_x, dim_z)
+            ikh = np.eye(self.dim_x) - np.dot(k, self.h)
+            x00 = np.dot(k, z[i])  # (dim_x)
+            p00 = np.dot(ikh, ikh.T) + np.linalg.multi_dot([k, r, k.T])  # (dim_x, dim_x)
+            x00s[i] = x00
+            p00s[i] = p00
+        initial_idx = 0 if self.xnn is None else self.xnn.shape[0]
+        active = np.ones(num_obj, dtype=bool)
+        self.xnn = np.concatenate([self.xnn, x00s], axis=0) if self.xnn is not None else x00s
+        self.pnn = np.concatenate([self.pnn, p00s], axis=0) if self.pnn is not None else p00s
+        self.x_nnm1 = np.concatenate([self.x_nnm1, np.zeros_like(x00s)], axis=0) if self.x_nnm1 is not None else np.zeros_like(x00s)
+        self.p_nnm1 = np.concatenate([self.p_nnm1, np.zeros_like(p00s)], axis=0) if self.p_nnm1 is not None else np.zeros_like(p00s)
+        self.active_idx = np.concatenate([self.active_idx, active], axis=0) if self.active_idx is not None else active
+        return list(range(initial_idx, initial_idx + num_obj))
+
+    def predict(self, u=None):
+        # update x_{n,n-1}, p_{n,n-1}
+        # u: (num_obj, dim_u)
+        num_obj = self.xnn.shape[0]
+        if u is not None and u.shape[0] != num_obj:
+            raise Exception("u shape error")
+
+        for i in range(num_obj):
+            if not self.active_idx[i]:
+                continue
+            self.x_nnm1[i] = np.dot(self.f, self.xnn[i]) + (np.dot(self.g, u[i]) if u is not None else 0)
+            self.p_nnm1[i] = np.linalg.multi_dot([self.f, self.pnn[i], self.f.T]) + self.q_fn(self.x_nnm1[i])
+
+    def correct(self, z):
+        # update x_{n,n}, p_{n,n}
+        # z: (num_obj, dim_z)
+        num_obj = self.xnn.shape[0]
+        if z.shape[0] != num_obj:
+            raise Exception("z shape error")
+
+        for i in range(num_obj):
+            if not self.active_idx[i]:
+                continue
+            r = self.r_fn(z[i])
+            hphr_inv = np.linalg.pinv(np.linalg.multi_dot([self.h, self.p_nnm1[i], self.h.T]) + r)
+            k = np.linalg.multi_dot([self.p_nnm1[i], self.h.T, hphr_inv])
+            ikh = np.eye(self.dim_x) - np.dot(k, self.h)
+            dz = z[i] - np.dot(self.h, self.x_nnm1[i])
+            mahalanobis = np.linalg.multi_dot([dz.T, hphr_inv, dz])
+            self.xnn[i] = self.x_nnm1[i] + (np.dot(k, dz) if mahalanobis < 3.0 else 0)
+            self.pnn[i] = np.linalg.multi_dot([ikh, self.p_nnm1[i], ikh.T]) + np.linalg.multi_dot([k, r, k.T])
+
+
+class Hungarian:
+    def __init__(self):
+        self.n = None
+        self.row_covered = None
+        self.col_covered = None
+        self.done = None
+        pass
+
+    def compute(self, mat):
+        # mat: (n, n)
+        mat = np.array(mat)
+        if mat.shape[0] != mat.shape[1]:
+            raise Exception("mat shape error")
+        self.n = mat.shape[0]
+        self.done = False
+
+        mat = self._step1(mat)
+        while not self.done:
+            self._step2(mat)
+            self._step3(mat)
+            self._step4(mat)
+        pass
+
+    def _step1(self, mat):
+        row_min = mat.min(axis=1, keepdims=True)
+        return mat - row_min
+
+    def _step2(self, mat):
+        self.row_covered = np.zeros(self.n, dtype=bool)
+        self.col_covered = np.zeros(self.n, dtype=bool)
+        for i in range(self.n):
+            for j in range(self.n):
+                if mat[i, j] == 0 and not self.row_covered[i] and not self.col_covered[j]:
+                    self.row_covered[i] = True
+                    self.col_covered[j] = True
+                    break
+        return self.row_covered.sum() == self.n
+
+
+
+
 
 
     
