@@ -13,7 +13,7 @@ import pyproj
 
 from PIL import Image
 
-__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv", "Coord", "KalmanFilter"]
+__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv", "Coord", "KalmanFilter", "Hungarian"]
 
 
 def load_json(file):
@@ -224,40 +224,68 @@ class KalmanFilter:
 class Hungarian:
     def __init__(self):
         self.n = None
-        self.row_covered = None
-        self.col_covered = None
+        self.m = None
+        self.optim = None
         self.done = None
         pass
 
     def compute(self, mat):
-        # mat: (n, n)
         mat = np.array(mat)
-        if mat.shape[0] != mat.shape[1]:
-            raise Exception("mat shape error")
-        self.n = mat.shape[0]
+        self.n, self.m = mat.shape
         self.done = False
 
         mat = self._step1(mat)
-        while not self.done:
-            self._step2(mat)
-            self._step3(mat)
-            self._step4(mat)
-        pass
+        while not self._step2(mat):
+            row_uncovered, col_uncovered = self._step3(mat)
+            mat = self._step4(mat, row_uncovered, col_uncovered)
+        return self.optim
 
     def _step1(self, mat):
         row_min = mat.min(axis=1, keepdims=True)
-        return mat - row_min
+        mat = mat - row_min
+        col_min = mat.min(axis=0, keepdims=True)
+        mat = mat - col_min
+        return mat
 
     def _step2(self, mat):
-        self.row_covered = np.zeros(self.n, dtype=bool)
-        self.col_covered = np.zeros(self.n, dtype=bool)
+        row_covered = np.zeros(self.n, dtype=bool)
+        col_covered = np.zeros(self.m, dtype=bool)
+        self.optim = []
         for i in range(self.n):
-            for j in range(self.n):
-                if mat[i, j] == 0 and not self.row_covered[i] and not self.col_covered[j]:
-                    self.row_covered[i] = True
-                    self.col_covered[j] = True
+            for j in range(self.m):
+                if mat[i, j] == 0 and not row_covered[i] and not col_covered[j]:
+                    row_covered[i] = True
+                    col_covered[j] = True
+                    self.optim.append((i, j))
                     break
-        return self.row_covered.sum() == self.n
+        self.done = row_covered.sum() == self.n
+        return self.done
+
+    def _step3(self, mat):
+        row_uncovered = np.ones(self.n, dtype=bool)
+        col_uncovered = np.ones(self.m, dtype=bool)
+        while mat[np.ix_(row_uncovered, col_uncovered)].min() == 0:
+            mat_uncovered = mat.copy()
+            mat_uncovered[~row_uncovered, :] = 0
+            mat_uncovered[:, ~col_uncovered] = 0
+            zero_in_row = (mat_uncovered == 0).sum(axis=1) * row_uncovered
+            zero_in_col = (mat_uncovered == 0).sum(axis=0) * col_uncovered
+            zero_max_row_idx = zero_in_row.argmax()
+            zero_max_col_idx = zero_in_col.argmax()
+            if zero_in_row[zero_max_row_idx] >= zero_in_col[zero_max_col_idx]:
+                row_uncovered[zero_max_row_idx] = False
+            else:
+                col_uncovered[zero_max_col_idx] = False
+        return row_uncovered, col_uncovered
+
+    def _step4(self, mat, row_uncovered, col_uncovered):
+        uncovered = np.ix_(row_uncovered, col_uncovered)
+        covered = np.ix_(~row_uncovered, ~col_uncovered)
+        min_val = mat[uncovered].min()
+        mat[covered] += min_val
+        mat[uncovered] -= min_val
+        return mat
+
 
 
 
