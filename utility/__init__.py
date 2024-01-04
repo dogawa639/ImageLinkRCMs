@@ -164,6 +164,9 @@ class KalmanFilter:
         self.p_nnm1 = None  # (num_obj, dim_x, dim_x)
         self.active_idx = None  # (num_obj), bool
 
+    def __len__(self):
+        return 0 if self.xnn is None else self.xnn.shape[0]
+
     def add_obj(self, z):
         # initilize x, p
         # z: (num_obj, dim_z)
@@ -191,6 +194,8 @@ class KalmanFilter:
     def predict(self, u=None):
         # update x_{n,n-1}, p_{n,n-1}
         # u: (num_obj, dim_u)
+        if self.xnn is None:
+            return
         num_obj = self.xnn.shape[0]
         if u is not None and u.shape[0] != num_obj:
             raise Exception("u shape error")
@@ -204,6 +209,8 @@ class KalmanFilter:
     def correct(self, z):
         # update x_{n,n}, p_{n,n}
         # z: (num_obj, dim_z)
+        if self.xnn is None:
+            return
         num_obj = self.xnn.shape[0]
         if z.shape[0] != num_obj:
             raise Exception("z shape error")
@@ -258,7 +265,7 @@ class Hungarian:
                     col_covered[j] = True
                     self.optim.append((i, j))
                     break
-        self.done = row_covered.sum() == self.n
+        self.done = row_covered.sum() == self.n or col_covered.sum() == self.m
         return self.done
 
     def _step3(self, mat):
