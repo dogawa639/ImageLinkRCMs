@@ -18,6 +18,7 @@ class Logger:
                 "config": conf_file
         }
 
+        self.fig = plt.figure(tight_layout=True)
         self.closed = False
 
     def close(self):
@@ -27,7 +28,6 @@ class Logger:
 
         dump_json(self.data, self.json_file)
         plt.show()
-
         self.closed = True
 
     def add_log(self, key, value):
@@ -43,9 +43,6 @@ class Logger:
         else:
             self.data[key] = [value]
 
-        plt.close("all")
-        fig = plt.figure()
-        plt.tight_layout()
         v_list = []
         label_list = []
         for k, v in self.data.items():
@@ -65,11 +62,10 @@ class Logger:
         prop_num = len(v_list)
         if prop_num == 0:
             return
-        plt.close("all")
-        fig = plt.figure()
-        plt.tight_layout()
+
+        self.fig.clf()
         for i in range(prop_num):
-            ax = fig.add_subplot(prop_num, 1, i + 1)
+            ax = self.fig.add_subplot(prop_num, 1, i + 1)
             if len(v_list[i]) == 1:
                 if type(v_list[i]) is np.array:
                     ax.scatter([0] * len(v_list[i][0]), v_list[i][0], label=label_list[i])
@@ -104,9 +100,7 @@ class Logger:
         prop_num = len(v_list)
         if prop_num == 0:
             return
-        plt.close("all")
         fig = plt.figure()
-        plt.tight_layout()
         for i in range(prop_num):
             ax = fig.add_subplot(prop_num, 1, i+1)
             if len(v_list[i]) == 1:
@@ -121,13 +115,5 @@ class Logger:
         plt.savefig(out_path)
         plt.show()
 
-# test
-if __name__ == "__main__":
-    logger = Logger("/Users/dogawa/Desktop/Git/ImageLinkRCM/debug/log_test.json", "")
-    for i in range(10):
-        logger.add_log("test", i)
-        time.sleep(1)
-    logger.close()
-    logger.save_fig("/Users/dogawa/Desktop/Git/ImageLinkRCM/debug/model/log_test.png")
 
 

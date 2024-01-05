@@ -31,7 +31,7 @@ if __name__ == "__main__":
     model_dir = read_save["model_dir"]
     log_dir = read_save["log_dir"]
 
-    TRINING = False
+    TRINING = True
     TESTING = True
     EARLY_STOP = True
     SAVE_MODEL = True
@@ -44,20 +44,21 @@ if __name__ == "__main__":
     base_dirs_h = [os.path.join(onehot_data_dir, x["name"]) for x in one_hot_data]
 
     num_classes = 12  # class_num (including other class, class_num = 0)
-    l1_coeff = 0.001
+    l_coeff = 0.001
 
-    kwargs = {"expansion": 2,
+    kwargs = {"expansion": 1,
               "crop": True,
               "affine": True,
               "transform_coincide": True,
               "flip": True}
-    loader_kwargs = {"batch_size": 4,
+    loader_kwargs = {"batch_size": 64,
                      "shuffle": True,
                      "num_workers": 2,
-                     "pin_memory": True}
+                     "pin_memory": True,
+                     "drop_last": True}
 
     xhimage_dataset = XHImageDataset(base_dirs_x, base_dirs_h, **kwargs)
-    train_data, val_data, test_data = xhimage_dataset.split_into((0.1, 0.02, 0.02))
+    train_data, val_data, test_data = xhimage_dataset.split_into((0.2, 0.02, 0.02))
     train_data_num = len(train_data)
     val_data_num = len(val_data)
     test_data_num = len(test_data)
@@ -69,7 +70,7 @@ if __name__ == "__main__":
 
     model = deeplabv3_resnet50(weights_backbone=ResNet50_Weights.DEFAULT, num_classes=num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="sum", label_smoothing=1./num_classes/100)
 
     logger = Logger(os.path.join(log_dir, f"{case_name}.json"), CONFIG)
     model_path = os.path.join(model_dir, "lu2lu.pth")
@@ -93,10 +94,10 @@ if __name__ == "__main__":
                 out = model(batch_x[1])["out"]  # (N, C, H, W)
                 out = out * batch_x[2].unsqueeze(1)
                 loss = loss_fn(out, batch_h[1])
-                l1_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
+                l_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
                 for w in model.parameters():
-                    l1_loss = l1_loss + torch.sum(torch.square(w))
-                loss_total = loss + l1_coeff / 1.0 ** epoch * l1_loss
+                    l_loss = l_loss + torch.sum(torch.square(w))
+                loss_total = loss + l_coeff / 1.0 ** epoch * l_loss
                 loss_total.backward()
                 optimizer.step()
                 tmp_loss += loss.clone().cpu().detach().item()
@@ -117,10 +118,10 @@ if __name__ == "__main__":
                 out = model(batch_x[1])["out"]  # (N, C, H, W)
                 out = out * batch_x[2].unsqueeze(1)
                 loss = loss_fn(out, batch_h[1])
-                l1_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
+                l_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
                 for w in model.parameters():
-                    l1_loss = l1_loss + torch.sum(torch.square(w))
-                loss_total = loss + l1_coeff / 1.0 ** epoch * l1_loss
+                    l_loss = l_loss + torch.sum(torch.square(w))
+                loss_total = loss + l_coeff / 1.0 ** epoch * l_loss
                 tmp_loss += loss.clone().cpu().detach().item()
                 tmp_loss_total += loss_total.clone().cpu().detach().item()
                 if img_shape is None:
@@ -149,7 +150,7 @@ if __name__ == "__main__":
 
     if TESTING:
         # test
-        model = deeplabv3_resnet50(weights_backbone=ResNet50_Weights.DEFAULT, num_classes=num_classes)
+        model = deeplabv3_resnet50(num_classes=num_classes)
         model.load_state_dict(torch.load(model_path))
         model.to(device)
 
@@ -178,13 +179,13 @@ if __name__ == "__main__":
                 ax = fig2.add_subplot(sample_num, 2, i * 2 + 2)
                 ax.imshow(batch_h[0][0].cpu().detach().numpy())
                 ax.set_title(f"ground_truth_{i}")
-        fig1.savefig(os.path.join(log_dir, f"{case_name}_original.png"))
-        fig2.savefig(os.path.join(log_dir, f"{case_name}_predicted.png"))
-        plt.show()
         test_loss = tmp_loss / test_data_num
         print(f"test_loss: {test_loss}")
         logger.add_prop("test_loss", test_loss)
 
+        fig1.savefig(os.path.join(log_dir, f"{case_name}_original.png"))
+        fig2.savefig(os.path.join(log_dir, f"{case_name}_predicted.png"))
+        plt.show()
 
     logger.save_fig(os.path.join(log_dir, f"{case_name}.png"))
     logger.close()

@@ -50,20 +50,27 @@ if __name__ == "__main__":
     one_hot_data = load_json(onehot_data_path)
     base_dirs_h = [os.path.join(onehot_data_dir, x["name"]) for x in one_hot_data]
 
-    num_classes = 10  # class_num (including other class, class_num = 0)
+    num_classes = 12  # class_num (including other class, class_num = 0)
+    l_coeff = 0.001
 
-    kwargs = {"expansion": 2,
+    kwargs = {"expansion": 1,
               "crop": True,
               "affine": True,
               "transform_coincide": True,
               "flip": True}
-    loader_kwargs = {"batch_size": 4,
+    loader_kwargs = {"batch_size": 64,
                      "shuffle": True,
                      "num_workers": 2,
-                     "pin_memory": True}
+                     "pin_memory": True,
+                     "drop_last": True}
 
     stsatimage_dataset = StreetViewXDataset(streetview_data_path, base_dirs_x, link_prop_path, **kwargs)
     train_data, val_data, test_data = stsatimage_dataset.split_into((0.03, 0.01, 0.02))
+    train_data_num = len(train_data)
+    val_data_num = len(val_data)
+    test_data_num = len(test_data)
+    print(f"train_data_num: {train_data_num}, val_data_num: {val_data_num}, test_data_num: {test_data_num}")
+
     train_dataloader = DataLoader(train_data, **loader_kwargs)
     val_dataloader = DataLoader(val_data, **loader_kwargs)
     test_dataloader = DataLoader(test_data, **loader_kwargs)
@@ -86,6 +93,7 @@ if __name__ == "__main__":
             t1 = time.perf_counter()
             model.train()
             tmp_loss = 0.0
+            tmp_loss_total = 0.0
             # data_tuple, data_tuple_x, y_tensor
             # data_tuple[i]: (img_tensor_x, transformed_x, mask_x, idx_x)
             for data_tuple, data_tuple_x, y_tensor in train_dataloader:
@@ -95,18 +103,22 @@ if __name__ == "__main__":
                 optimizer.zero_grad()
                 out = model([transformed, transformed_x])["out"]
                 loss = loss_fn(out, y_tensor)
-                l1_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
+                l_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
                 for w in model.parameters():
-                    l1_loss = l1_loss + torch.sum(torch.abs(w))
-                loss_total = loss + 0.0001 / 2.0 ** epoch * l1_loss
+                    l_loss = l_loss + torch.sum(torch.abs(w))
+                loss_total = loss + l_coeff / 1.0 ** epoch * l_loss
                 loss_total.backward()
                 optimizer.step()
                 tmp_loss += loss.clone().cpu().detach().item()
-            train_loss = tmp_loss / len(train_dataloader)
+                tmp_loss_total += loss_total.clone().cpu().detach().item()
+            train_loss = tmp_loss / train_data_num
+            train_loss_total = tmp_loss_total / train_data_num
             logger.add_log("train_loss", train_loss)
+            logger.add_log("train_loss_total", train_loss_total)
 
             model.eval()
             tmp_loss = 0.0
+            tmp_loss_total = 0.0
             # data_tuple, data_tuple_x, y_tensor
             # data_tuple[i]: (img_tensor_x, transformed_x, mask_x, idx_x)
             for data_tuple, data_tuple_x, y_tensor in val_dataloader:
@@ -115,9 +127,16 @@ if __name__ == "__main__":
                 y_tensor = y_tensor.to(device)
                 out = model([transformed, transformed_x])["out"]
                 loss = loss_fn(out, y_tensor)
+                l_loss = torch.tensor(0.0, dtype=torch.float32, requires_grad=True)
+                for w in model.parameters():
+                    l_loss = l_loss + torch.sum(torch.square(w))
+                loss_total = loss + l_coeff / 1.0 ** epoch * l_loss
                 tmp_loss += loss.clone().cpu().detach().item()
-            val_loss = tmp_loss / len(val_dataloader)
+                tmp_loss_total += loss_total.clone().cpu().detach().item()
+            val_loss = tmp_loss / val_data_num
+            val_loss_total = tmp_loss_total / val_data_num
             logger.add_log("val_loss", val_loss)
+            logger.add_log("val_loss_total", val_loss_total)
 
             if EARLY_STOP:
                 if val_loss < min_loss:
@@ -129,10 +148,10 @@ if __name__ == "__main__":
                     stop_count = 0
                 else:
                     stop_count += 1
-                if stop_count >= 10:
+                if epoch > 20 and stop_count >= 10:
                     break
             t2 = time.perf_counter()
-            print(f"epoch: {epoch}, train_loss: {train_loss}, val_loss: {val_loss}, time: {t2 - t1}")
+            print(f"epoch: {epoch}, train_loss: {train_loss / num_classes}, val_loss: {val_loss / num_classes}, time: {t2 - t1}")
         print(f"min_val_loss: {min_loss}")
 
     if TESTING:
@@ -174,7 +193,7 @@ if __name__ == "__main__":
         fig.savefig(os.path.join(log_dir, f"{case_name}_comparison.png"))
         plt.show()
         test_loss = tmp_loss / len(test_dataloader)
-        print(f"test_loss: {test_loss}")
+        print(f"test_loss: {test_loss / num_classes}")
         logger.add_prop("test_loss", test_loss)
 
     logger.save_fig(os.path.join(log_dir, f"{case_name}.png"))
