@@ -33,7 +33,7 @@ class YoLoV5Detect:
         self.fps = 25.0
 
     def detect(self, movie_path, idxs, out_csv_dir=None, out_mov_path=None, colors=None, threshold=0.1):
-        # idx  0: "person"
+        # idx  0: "person", 1: bicycle, 2: car, 3: motorbike, 5: bus, 7: truck
         cap = cv2.VideoCapture(movie_path)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         frame_cnt = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
