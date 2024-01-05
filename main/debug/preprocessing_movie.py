@@ -3,7 +3,7 @@ if __name__ == "__main__":
     import os
     import numpy as np
     import datetime
-    from preprocessing.movie import YoLoV5Detect
+    from preprocessing.movie import YoLoV5Detect, ByteTrack
 
     CONFIG = "../../config/config_test.ini"
     config = configparser.ConfigParser()
@@ -25,11 +25,14 @@ if __name__ == "__main__":
                              device="mps")
     #detection.get_clip(os.path.join(camera_data_dir, "調査地点①/220928/20220928-224129MA.mp4"), os.path.join(movie_dir, "cap_1.png"), 0)
     #detection.detect(os.path.join(camera_data_dir, "調査地点①/220928/20220928-224129MA.mp4"), [0], out_csv_dir=movie_dir, out_mov_path=os.path.join(movie_dir, "people.mp4"))
-    #detection.mapping2xy(os.path.join(movie_dir, "yolov_out_0.csv"),
-    #                     os.path.join(movie_dir, "peope_2d.csv"),
-    #                     os.path.join(movie_dir, "peope_topview.mp4"), resolution=0.1)
-    #detection = YoLoV5Detect()
+
+    bytetrack = ByteTrack(1. / 25.)
+    bytetrack.track(os.path.join(movie_dir, "yolov_out_0.csv"), os.path.join(movie_dir, "byte_out_0.csv"))
+
+    detection.mapping2xy(os.path.join(movie_dir, "byte_out_0.csv"),
+                         os.path.join(movie_dir, "peope_2d_byte.csv"),
+                         os.path.join(movie_dir, "peope_topview_byte.mp4"), resolution=0.1)
     detection.write_detection_result_movie(
         os.path.join(camera_data_dir, "調査地点①/220928/20220928-224129MA.mp4"),
-        [os.path.join(movie_dir, "peope_2d.csv")],
-        os.path.join(movie_dir, "people_2d_total.mp4"))
+        [os.path.join(movie_dir, "peope_2d_byte.csv")],
+        os.path.join(movie_dir, "people_2d_total_byte.mp4"))

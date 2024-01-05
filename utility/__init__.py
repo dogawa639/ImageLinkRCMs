@@ -170,6 +170,7 @@ class KalmanFilter:
     def add_obj(self, z):
         # initilize x, p
         # z: (num_obj, dim_z)
+        z = np.array(z)
         num_obj = z.shape[0]
         x00s = np.zeros((num_obj, self.dim_x), dtype=np.float32)
         p00s = np.zeros((num_obj, self.dim_x, self.dim_x), dtype=np.float32)
@@ -209,6 +210,7 @@ class KalmanFilter:
     def correct(self, z):
         # update x_{n,n}, p_{n,n}
         # z: (num_obj, dim_z)
+        z = np.array(z)
         if self.xnn is None:
             return
         num_obj = self.xnn.shape[0]
@@ -232,6 +234,10 @@ class Hungarian:
     def __init__(self):
         self.n = None
         self.m = None
+        self.row_starred = None
+        self.col_starred = None
+        self.row_covered = None
+        self.col_covered = None
         self.optim = None
         self.done = None
         pass
@@ -242,55 +248,99 @@ class Hungarian:
         self.done = False
 
         mat = self._step1(mat)
-        while not self._step2(mat):
-            row_uncovered, col_uncovered = self._step3(mat)
-            mat = self._step4(mat, row_uncovered, col_uncovered)
+        self._step2(mat)
+        while not self.done:
+            self._step3()
+            min_val = self._step4(mat)
+            if min_val == 0:
+                break
+            mat = self._step6(mat, min_val)
         return self.optim
 
     def _step1(self, mat):
         row_min = mat.min(axis=1, keepdims=True)
         mat = mat - row_min
-        col_min = mat.min(axis=0, keepdims=True)
-        mat = mat - col_min
         return mat
 
     def _step2(self, mat):
-        row_covered = np.zeros(self.n, dtype=bool)
-        col_covered = np.zeros(self.m, dtype=bool)
+        # star zero
+        self.row_starred = np.zeros(self.n, dtype=bool)
+        self.col_starred = np.zeros(self.m, dtype=bool)
         self.optim = []
         for i in range(self.n):
             for j in range(self.m):
-                if mat[i, j] == 0 and not row_covered[i] and not col_covered[j]:
-                    row_covered[i] = True
-                    col_covered[j] = True
+                if mat[i, j] == 0 and not self.row_starred[i] and not self.col_starred[j]:
+                    self.row_starred[i] = True
+                    self.col_starred[j] = True
                     self.optim.append((i, j))
                     break
-        self.done = row_covered.sum() == self.n or col_covered.sum() == self.m
+        self.done = self.row_starred.sum() == self.n or self.col_starred.sum() == self.m
         return self.done
 
-    def _step3(self, mat):
-        row_uncovered = np.ones(self.n, dtype=bool)
-        col_uncovered = np.ones(self.m, dtype=bool)
-        while mat[np.ix_(row_uncovered, col_uncovered)].min() == 0:
-            mat_uncovered = mat.copy()
-            mat_uncovered[~row_uncovered, :] = 0
-            mat_uncovered[:, ~col_uncovered] = 0
-            zero_in_row = (mat_uncovered == 0).sum(axis=1) * row_uncovered
-            zero_in_col = (mat_uncovered == 0).sum(axis=0) * col_uncovered
-            zero_max_row_idx = zero_in_row.argmax()
-            zero_max_col_idx = zero_in_col.argmax()
-            if zero_in_row[zero_max_row_idx] >= zero_in_col[zero_max_col_idx]:
-                row_uncovered[zero_max_row_idx] = False
-            else:
-                col_uncovered[zero_max_col_idx] = False
-        return row_uncovered, col_uncovered
+    def _step3(self):
+        # cover columns with star zero
+        self.row_covered = np.zeros(self.n, dtype=bool)
+        self.col_covered = self.col_starred.copy()
 
-    def _step4(self, mat, row_uncovered, col_uncovered):
-        uncovered = np.ix_(row_uncovered, col_uncovered)
-        covered = np.ix_(~row_uncovered, ~col_uncovered)
-        min_val = mat[uncovered].min()
-        mat[covered] += min_val
-        mat[uncovered] -= min_val
+    def _step4(self, mat):
+        # cover row with prime zero while uncovering column
+        mat_covered = mat.copy()  # covered -> -1
+        mat_covered[:, self.col_covered] = -1
+        while (mat_covered == 0).sum() > 0:
+            for i in range(self.n):
+                for j in range(self.m):
+                    if mat_covered[i, j] == 0:
+                        if not self.row_starred[i]:
+                            self._step5(mat, i, j)  # change starred zero
+                        else:
+                            # uncover column j
+                            self.row_covered[i] = True
+                            self.col_covered[j] = False
+                            mat_covered[~self.row_covered, j] = mat[~self.row_covered, j]
+                            mat_covered[i, :] = -1
+        self.done = self.row_starred.sum() == self.n or self.col_starred.sum() == self.m
+        min_val = 0 if self.done else mat[np.ix_(~self.row_covered, ~self.col_covered)].min()
+        return min_val
+
+    def _step5(self, mat, i, j):
+        # no starred zero in row i
+        # change starred zero in col j
+        # z1: starred zero in col j
+        z2 = (-1, -1)
+        self.optim.append((i, j))
+        self.row_starred[i] = True
+        self.col_starred[j] = True
+        while z2 is not None:
+            recal = False
+            z2 = None
+            for i2 in range(self.n):
+                if i == i2:
+                    continue
+                if (i2, j) in self.optim:
+                    z1 = (i2, j)
+                    # z2: primed zero in row i2
+                    for j2 in range(self.m):
+                        if mat[i2, j2] == 0 and (i2, j2) not in self.optim:
+                            z2 = (i2, j2)
+                            self.optim.remove(z1)
+                            self.optim.append(z2)
+
+                            self.row_starred = np.zeros(self.n, dtype=bool)
+                            self.col_starred = np.zeros(self.m, dtype=bool)
+                            for z in self.optim:
+                                self.row_starred[z[0]] = True
+                                self.col_starred[z[1]] = True
+                            i = i2
+                            j = j2
+                            recal = True
+                            break
+                    if recal:
+                        break
+        self._step3()
+
+    def _step6(self, mat, min_val):
+        mat[self.row_covered, :] += min_val
+        mat[:, ~self.col_covered] -= min_val
         return mat
 
 

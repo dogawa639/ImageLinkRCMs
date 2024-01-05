@@ -14,7 +14,7 @@ import datetime
 import cv2
 from utility import *
 
-__all__ = ["YoLoV5Detect"]
+__all__ = ["YoLoV5Detect", "ByteTrack"]
 
 
 class YoLoV5Detect:
@@ -223,7 +223,7 @@ class YoLoV5Detect:
 
 
 class ByteTrack:
-    def __init__(self, dt, detect_thresh=0.1, iou_thresh=0.1, time_lost=1.0):
+    def __init__(self, dt, detect_thresh=0.1, iou_thresh=0.1, time_lost=1./ 25.):
         # dt: sec
         self.dt = dt
         self.detect_thresh = detect_thresh
@@ -232,10 +232,10 @@ class ByteTrack:
 
         # Kalman Filter
         # state : [x, y, aspect, height, vx, vy, v_aspect, v_height]
-        f = np.array([[1, 0, 0, 0, dt, 0, 0, 0],
-                      [0, 1, 0, 0, 0, dt, 0, 0],
-                      [0, 0, 1, 0, 0, 0, dt, 0],
-                      [0, 0, 0, 1, 0, 0, 0, dt],
+        f = np.array([[1, 0, 0, 0, 1, 0, 0, 0],
+                      [0, 1, 0, 0, 0, 1, 0, 0],
+                      [0, 0, 1, 0, 0, 0, 0, 0],
+                      [0, 0, 0, 1, 0, 0, 0, 1],
                       [0, 0, 0, 0, 1, 0, 0, 0],
                       [0, 0, 0, 0, 0, 1, 0, 0],
                       [0, 0, 0, 0, 0, 0, 1, 0],
@@ -245,74 +245,110 @@ class ByteTrack:
                       [0, 0, 1, 0, 0, 0, 0, 0],
                       [0, 0, 0, 1, 0, 0, 0, 0]])
 
-        def q_fn(x):
-            return np.diag(np.square([0.1 * x[3], 0.1 * x[3], 0.01, 0.1 * x[3], 0.01 * x[3], 0.01 * x[3], 1e-5, 0.01 * x[3]]))
+        def q_fn(x):  # process noise
+            return np.diag(np.square([0.05 * x[3], 0.05 * x[3], 0.01, 0.08 * x[3], 0.05 * x[3], 0.05 * x[3], 0.1, 0.05 * x[3]]))
 
-        def r_fn(z):
-            return np.diag(np.square([0.05 * z[3], 0.05 * z[3], 0.01, 0.05 * z[3]]))
+        def r_fn(z):  # observation noise
+            return np.diag(np.square([0.5 * z[3], 0.5 * z[3], 0.2, 0.8 * z[3]]))
 
         self.kalman_filter = KalmanFilter(f, h, q_fn, r_fn)
         self.hungarian = Hungarian()
 
 
-    def track(self, obj_df):
+    def track(self, obj_df, out_path=None):
         # obj_df : ["frame_num", "x1", "y1", "x2", "y2", "conf", "foot_x", "foot_y"]
         obj_df = obj_df if type(obj_df) is pd.DataFrame else pd.read_csv(obj_df)
-        frame_num = int(obj_df["frame_num"].max()) + 1
+        aspect = (obj_df["x2"] - obj_df["x1"]) / (obj_df["y2"] - obj_df["y1"])
+        obj_df = obj_df[(aspect < 1.0) & (aspect > 0.1)]
 
+        frame_num = int(obj_df["frame_num"].max()) + 1
+        unused_count = []
+
+        traj_total = []  # [["frame_num", "x1", "y1", "x2", "y2", "foot_x", "foot_y", "p_foot_x", "p_foot_y", "id"]]
         for i in range(frame_num):
+            unused_count = [count + 1 for count in unused_count]
             target = obj_df.loc[obj_df["frame_num"] == i, :]
             if len(target) == 0:
                 continue
             self.kalman_filter.predict()
 
+            # divide into 2 sets
             target_high = target.loc[target["conf"] > self.detect_thresh, :]
             target_low = target.loc[target["conf"] <= self.detect_thresh, :]
 
-            z = np.zeros((len(self.kalman_filter), 4), dtype=np.float32)
-            z_matched = []
-            z_unmatched = []
-            if len(target_high) > 0 and (self.kalman_filter.xnn is not None and sum(self.kalman_filter.active_idx) > 0):
-                coords_high = target_high[["x1", "x2", "x2", "y2"]].values
-                states = self.kalman_filter.xnn[self.kalman_filter.active_idx, :]
-                ious = np.array([[self.iou(state, coord) for coord in coords_high] for state in states])  # (traj_num, obj_num)
-                matched = self.hungarian.compute(1 - ious)
+            z = np.zeros((len(self.kalman_filter), 4), dtype=np.float32)  # z for kalman filter update
+            z_unmatched = []  # unmatched high confidence set
+            matched_traj = []
+            matched_obj = []
+            matched_traj_idx = [False] * len(self.kalman_filter)  # matched trajectory index
+            # first matching: high confidence set - trajectory
+            if len(target_high) > 0:
+                matched = []
+                coords_high = target_high[["x1", "y1", "x2", "y2"]].values
+                if len(self.kalman_filter) > 0 and sum(self.kalman_filter.active_idx) > 0:
+                    states = self.kalman_filter.xnn[self.kalman_filter.active_idx, :]
+                    ious = np.array([[self.iou(state, coord) for coord in coords_high] for state in states])  # (traj_num, obj_num)
+                    matched = self.hungarian.compute(1 - ious)
 
-                matched_traj = []
-                matched_obj = []
-                for i in range(len(matched)):
-                    if ious[*matched[i]] >= self.iou_thresh:
-                        matched_traj.append(np.arange(len(self.kalman_filter))[self.kalman_filter.active_idx][matched[i][0]])
-                        matched_obj.append(matched[i][1])
+                for j in range(len(matched)):
+                    if ious[*matched[j]] >= self.iou_thresh:
+                        traj_idx = np.arange(len(self.kalman_filter))[self.kalman_filter.active_idx][matched[j][0]]
+                        matched_traj.append(traj_idx)
+                        matched_obj.append(matched[j][1])
 
-                for i in range(len(coords_high)):
-                    if i in matched_obj:
-                        z_matched.append(ByteTrack.get_state(coords_high[i]))
+                        unused_count[traj_idx] = 0
+                        matched_traj_idx[traj_idx] = True
+                for j in range(len(coords_high)):
+                    if j in matched_obj:
+                        z[matched_traj[matched_obj.index(j)]] = ByteTrack.get_state(coords_high[j])
                     else:
-                        z_unmatched.append(ByteTrack.get_state(coords_high[i]))
-                z[matched_traj, :] = z_matched
+                        z_unmatched.append(ByteTrack.get_state(coords_high[j]))
 
-            if len(target_low) > 0 and (self.kalman_filter.xnn is not None and sum(self.kalman_filter.active_idx) > 0):
-                coords_low = target_low[["x1", "x2", "x2", "y2"]].values
+            # second matching: low confidence set - trajectory
+            if len(target_low) > 0 and (len(self.kalman_filter) > 0 and sum(self.kalman_filter.active_idx) > 0):
+                coords_low = target_low[["x1", "y1", "x2", "y2"]].values
                 active_idx = self.kalman_filter.active_idx.copy()
                 active_idx[matched_traj] = False
-                states = self.kalman_filter.xnn[active_idx, :]
+                states = self.kalman_filter.xnn[active_idx, :]  # traj_remain
                 ious = np.array([[self.iou(state, coord) for coord in coords_low] for state in states])  # (traj_num, obj_num)
                 matched = self.hungarian.compute(1 - ious)
 
                 matched_traj = []
                 matched_obj = []
-                for i in range(len(matched)):
-                    if ious[*matched[i]] >= self.iou_thresh:
-                        matched_traj.append(np.arange(len(self.kalman_filter))[self.kalman_filter.active_idx][matched[i][0]])
-                        matched_obj.append(matched[i][1])
-                for i in range(len(coords_low)):
-                    if i in matched_obj:
-                        z_matched.append(ByteTrack.get_state(coords_low[i]))
-                z[matched_traj, :] = z_matched
+                for j in range(len(matched)):
+                    if ious[*matched[j]] >= self.iou_thresh:
+                        traj_idx = np.arange(len(self.kalman_filter))[active_idx][matched[j][0]]
+                        matched_traj.append(traj_idx)
+                        matched_obj.append(matched[j][1])
 
-            self.kalman_filter.correct(z)
+                        unused_count[traj_idx] = 0
+                        matched_traj_idx[traj_idx] = True
+                for j in range(len(coords_low)):
+                    if j in matched_obj:
+                        z[matched_traj[matched_obj.index(j)]] = ByteTrack.get_state(coords_low[j])
 
+            if len(self.kalman_filter) > 0:
+                tmp_active_idx = self.kalman_filter.active_idx.copy()
+                self.kalman_filter.active_idx = np.array(matched_traj_idx)
+                self.kalman_filter.correct(z)
+                self.kalman_filter.active_idx = tmp_active_idx & (np.array(unused_count) < self.time_lost / self.dt)
+            self.kalman_filter.add_obj(z_unmatched)
+            unused_count += [0] * len(z_unmatched)
+
+            for j in range(len(self.kalman_filter)):
+                if self.kalman_filter.active_idx[j]:
+                    x, y, aspect, height, vx, vy, v_aspect, v_height = self.kalman_filter.xnn[j, :]
+                    px, py, paspect, pheight, pvx, pvy, pv_aspect, pv_height = np.diag(self.kalman_filter.pnn[j, :])
+                    width = aspect * height
+                    x1, y1, x2, y2 = x - width / 2, y - height, x + width / 2, y
+                    if height < 0 or aspect < 0 or min([x1, y1, x2, y2]) < 0 or max([x1, y1, x2, y2]) > 1:
+                        continue
+                    traj_total.append([i, x1, y1, x2, y2, x, y, px, py, j+1])
+
+        traj_total = pd.DataFrame(traj_total, columns=["frame_num", "x1", "y1", "x2", "y2", "foot_x", "foot_y", "p_foot_x", "p_foot_y", "id"])
+        if out_path is not None:
+            traj_total.to_csv(out_path, index=False)
+        return traj_total
 
     @staticmethod
     def iou(state, coords):
