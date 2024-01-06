@@ -5,7 +5,7 @@ if __name__ == "__main__":
     from utility import *
     from learning.discriminator import *
 
-    CONFIG = "/Users/dogawa/Desktop/Git/GANs/config/config_test.ini"
+    CONFIG = "../../config/config_test.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
 

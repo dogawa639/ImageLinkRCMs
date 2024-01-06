@@ -1,14 +1,17 @@
+# test
 if __name__ == "__main__":
     import configparser
     import json
-
-    import torch
-    from torchinfo import summary
+    from learning.generator import *
+    from learning.discriminator import *
+    from learning.encoder import *
+    from learning.w_encoder import *
+    from learning.util import get_models
     from preprocessing.network import *
     from preprocessing.pp import *
     from preprocessing.image import *
     from preprocessing.dataset import *
-    from learning.util import *
+    from learning.airl import *
 
     CONFIG = "../../config/config_test.ini"
     config = configparser.ConfigParser()
@@ -17,16 +20,26 @@ if __name__ == "__main__":
     read_general = config["GENERAL"]
     model_type = read_general["model_type"]  # cnn or gnn
     device = read_general["device"]
-
+    # model
     read_data = config["DATA"]
     node_path = read_data["node_path"]
     link_path = read_data["link_path"]
     link_prop_path = read_data["link_prop_path"]
 
     pp_path = json.loads(read_data["pp_path"])  # list(str)
-    image_data_path = read_data["image_data_path"]  # str or None
+    image_data_path = read_data["image_data_path"] # str or None
     image_data_path = None if image_data_path == "null" else image_data_path
-
+    # train setting
+    read_train = config["TRAIN"]
+    bs = int(read_train["bs"])  # int
+    epoch = int(read_train["epoch"])  # int
+    lr_g = float(read_train["lr_g"])  # float
+    lr_d = float(read_train["lr_d"])  # float
+    lr_f0 = float(read_train["lr_f0"])  # float
+    lr_e = float(read_train["lr_e"])  # float
+    shuffle = bool(read_train["shuffle"])  # bool
+    train_ratio = float(read_train["train_ratio"])  # float
+    d_epoch = int(read_train["d_epoch"])  # int
     # model setting
     read_model = config["MODELSETTING"]
     use_f0 = bool(read_model["use_f0"])  # bool
@@ -39,12 +52,17 @@ if __name__ == "__main__":
     w_dim = int(read_model["w_dim"])  # int
     num_head = int(read_model["num_head"])  # int
     depth = int(read_model["depth"])  # int
-    gamma = float(read_model["gamma"])  # float
+    gamma = float(read_model["gamma"])   # float
     max_num = int(read_model["max_num"])  # int
     ext_coeff = float(read_model["ext_coeff"])  # float
     hinge_loss = bool(read_model["hinge_loss"])  # bool
     hinge_thresh = json.loads(read_model["hinge_thresh"])  # float or None
     patch_size = int(read_model["patch_size"])  # int
+    # save setting
+    read_save = config["SAVE"]
+    model_dir = read_save["model_dir"]
+    fig_dir = read_save["figure_dir"]
+    image_file = os.path.join(fig_dir, "train.png")
 
     # instance creation
     use_index = (model_type == "cnn")
@@ -107,40 +125,7 @@ if __name__ == "__main__":
     else:
         discriminator, generator, f0, w_encoder, encoder = get_models(model_names, **kwargs)
 
-    print(model_type)
-    if model_type == "cnn":
-        total_feature_num = nw_data.feature_num + nw_data.context_feature_num
-        input_size = (10, total_feature_num, 3, 3)
-        input_size2 = (10, 2, 3, 3)
-        print("---Discriminator---")
-        print(summary(model=discriminator, input_size=[input_size, input_size2, (10, w_dim)]))
-        print("---Generator---")
-        print(summary(model=generator, input_size=[input_size, (10, w_dim)]))
-        if f0 is not None:
-            print("---F0---")
-            print(summary(model=f0, input_size=(10, h_dim)))
-        if w_encoder is not None:
-            print("---W_encoder---")
-            print(summary(model=w_encoder, input_size=[input_size, (10, 3, 3)]))
-        if encoder is not None:
-            print("---Encoder---")
-            print(summary(model=encoder, input_size=[(10, 1000), (10, w_dim)]))
-    elif model_type == "gnn":
-        input_size = (5, nw_data.link_num, nw_data.feature_num)
-        input_size2 = (5, nw_data.link_num, nw_data.link_num, 2)
-        print("---Discriminator---")
-        print(summary(model=discriminator, input_size=[input_size, input_size2, (5, w_dim)]))
-        print("---Generator---")
-        print(summary(model=generator, input_size=[input_size, (5, w_dim)]))
-        if f0 is not None:
-            print("---F0---")
-            print(summary(model=f0, input_size=(5, h_dim)))
-        if w_encoder is not None:
-            print("---W_encoder---")
-            print(summary(model=w_encoder, input_size=[input_size, (5, nw_data.link_num, nw_data.link_num)]))
-        if encoder is not None:
-            print("---Encoder---")
-            print(summary(model=encoder, input_size=[(5, 1000), (5, w_dim)]))
+    airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=image_data, encoder=encoder, h_dim=h_dim, emb_dim=emb_dim, f0=f0,
+                 hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, patch_size=patch_size, device=device)
 
-
-
+    airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
