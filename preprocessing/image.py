@@ -519,6 +519,10 @@ class OneHotImageData(SatelliteImageData):
             if os.path.exists(tmp_dir):
                 shutil.rmtree(tmp_dir)
             os.makedirs(tmp_dir)  # [np.array((3, H, W), dtype=np.uin8)] RGB
+            self.gis_segs[i].write_color_info()
+            self.gis_segs[i].write_colormap(os.path.join(tmp_dir, "colormap.png"))
+            self.gis_segs[i].write_hist(os.path.join(tmp_dir, "class_hist.png"))
+
             for j, patch in enumerate(patches):  # (3, H, W) RGB or (H, W) gray
                 path_org = os.path.join(tmp_dir, f"{self.nw_data.lids_all[j]}_org.png")  # color is not sorted by pixel count
                 if len(patch.shape) == 3:
@@ -530,7 +534,6 @@ class OneHotImageData(SatelliteImageData):
                 path_onehot = None#os.path.join(tmp_dir, f"{self.nw_data.lids_all[j]}_onehot.npy")
                 path_vis = os.path.join(tmp_dir, f"{self.nw_data.lids_all[j]}_vis.png")
                 self.gis_segs[i].convert_file(path_org, png_file=path, np_file=path_onehot, vis_file=path_vis)
-                self.gis_segs[i].write_color_info()
 
         self._output_data_file()
 
@@ -538,15 +541,16 @@ class OneHotImageData(SatelliteImageData):
         # columns: [LinkID, ...]
         df = pd.DataFrame({"LinkID": [lid for lid in self.nw_data.edges_all.keys()]})
         for i, data in enumerate(self.data_list):
+            class_num = min(self.gis_segs[i].class_num, self.max_class_num)
             data_name = self.data_list[i]["name"]
             tmp_dir = os.path.join(data_dir, data_name)
             # name of the png files are link_ids
             # self.nw_data are registered in set_voronoi
             tmp_val = None
             for j, lid in enumerate(self.nw_data.lids_all):
-                tmp_file = os.path.join(tmp_dir, f"{lid}_onehot.npy")
+                tmp_file = os.path.join(tmp_dir, f"{lid}.png")
                 if os.path.exists(tmp_file):
-                    ratio = OneHotImageData.get_prop_ratio(tmp_file)  # (C)
+                    ratio = OneHotImageData.get_prop_ratio(tmp_file, class_num)  # (C)
                     if tmp_val is None:
                         tmp_val = np.zeros((len(self.nw_data.lids_all), len(ratio)), dtype=np.float32)
                     tmp_val[j, :] = ratio
@@ -578,10 +582,18 @@ class OneHotImageData(SatelliteImageData):
         self._output_data_file()
 
     @staticmethod
-    def get_prop_ratio(onehot_path):
-        onehot = np.load(onehot_path)  # (C, H, W)
-        class_sum = onehot.sum((1, 2))
-        total = class_sum.sum()
+    def get_prop_ratio(onehot_path, class_num):
+        _, ext = os.path.splitext(onehot_path)
+        if ext == ".npy":
+            onehot = np.load(onehot_path)  # (C, H, W)
+            class_sum = onehot.sum((1, 2))
+            total = class_sum.sum()
+        elif ext == ".png":
+            onehot = np.array(Image.open(onehot_path))
+            class_sum = np.array([(onehot == i).sum() for i in range(class_num)])
+            total = class_sum.sum()
+        else:
+            raise ValueError(f"extension {ext} is not supported.")
         return class_sum / (total + (total == 0))
 
 

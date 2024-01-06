@@ -20,6 +20,9 @@ if __name__ == "__main__":
     onehot_data_path = read_data["onehot_data_path"]  # json
     onehot_data_dir = read_data["onehot_image_datadir"]  # dir
 
+    read_feature = config["FEATURE"]
+    max_class_num = int(read_feature["max_class_num"])
+
     SATELLITE = False
     ONEHOT = True
     LINKPROP = True
@@ -32,7 +35,7 @@ if __name__ == "__main__":
         image_data.set_datafolder(image_data_dir, patch_size=128)
     if ONEHOT:
         output_data_path = os.path.splitext(onehot_data_path)[0] + "_processed.json"
-        image_data = OneHotImageData(onehot_data_path, resolution=0.5, output_data_file=output_data_path)
+        image_data = OneHotImageData(onehot_data_path, resolution=0.5, output_data_file=output_data_path, max_class_num=max_class_num)
         image_data.set_voronoi(nw_data)
         image_data.set_datafolder(onehot_data_dir, patch_size=128)
         if LINKPROP:  # overwrite link_prop model with one-hot model

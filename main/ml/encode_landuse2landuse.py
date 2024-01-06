@@ -27,6 +27,9 @@ if __name__ == "__main__":
     onehot_data_path = read_data["onehot_data_path"]  # json
     onehot_data_dir = read_data["onehot_image_datadir"]  # dir
 
+    read_feature = config["FEATURE"]
+    num_classes = int(read_feature["max_class_num"])  # class_num (including other class, class_num = 0)
+
     read_save = config["SAVE"]
     model_dir = read_save["model_dir"]
     log_dir = read_save["log_dir"]
@@ -43,7 +46,6 @@ if __name__ == "__main__":
     one_hot_data = load_json(onehot_data_path)
     base_dirs_h = [os.path.join(onehot_data_dir, x["name"]) for x in one_hot_data]
 
-    num_classes = 12  # class_num (including other class, class_num = 0)
     l_coeff = 0.001
 
     kwargs = {"expansion": 1,
