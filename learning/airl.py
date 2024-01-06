@@ -400,7 +400,7 @@ if __name__ == "__main__":
     model_names = ["CNNDis", "CNNGen"] if model_type == "cnn" else ["GNNDis", "GNNGen"]
     if use_f0:
         model_names += ["FNW"]
-        model_names += ["CNNWEnc"] if use_encoder else ["GNNWEnc"]
+        model_names += ["CNNWEnc"] if model_type == "cnn" else ["GNNWEnc"]
     if use_encoder:
         model_names += ["CNNEnc"]
 

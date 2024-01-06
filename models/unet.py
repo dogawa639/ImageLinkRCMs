@@ -3,6 +3,7 @@ from torch import tensor, nn
 import torch.nn.functional as F
 from torch.nn.utils import spectral_norm
 
+__all__ = ["UNet"]
 
 class BaseConv(nn.Module):
     def __init__(self, in_channels, out_channels, sn=False):
@@ -83,12 +84,4 @@ class UNet(nn.Module):
         x = self.out_conv(x)
         return x
 
-
-# test
-if __name__ == "__main__":
-    device = "mps"
-    x = torch.randn(1, 3, 256, 256).to(device)
-    model = UNet(3, 1).to(device)
-    y = model(x)
-    print(y.shape)
 

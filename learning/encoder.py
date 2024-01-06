@@ -39,7 +39,7 @@ class CNNEnc(nn.Module):
             self.resnet50  # output: (1, mid_dim)
         )
 
-    def forward(self, x, source_i=0, w=None):
+    def forward(self, x, w=None, source_i=0):
         # x: (bs2, mid_dim) or (mid_dim)
         # w: (bs1, w_dim) or (w_dim)
         # output: (bs1, bs2, emb_dim) or (bs2, emb_dim) or (emb_dim)
@@ -71,23 +71,6 @@ class CNNEnc(nn.Module):
             patch = patch.unsqueeze(0)  # (1, c, h, w)
         x = self.seq(patch)   # (bs2, 1000)
         return x
-
-# test
-if __name__ == "__main__":
-    patch_size = (3, 256, 256)
-    bs = 3
-    emb_dim = 5
-    num_source = 1
-    w_dim = 6
-    link_num = 10
-    device = "mps"
-    inputs = torch.randn(link_num, *patch_size).to(device)
-    w = torch.randn(bs, w_dim).to(device)
-
-    cnn = CNNEnc(patch_size, emb_dim=emb_dim, num_source=num_source, w_dim=w_dim).to(device)
-
-    out = cnn(inputs, source_i=0, w=w)
-    print(out.shape)
 
 
 

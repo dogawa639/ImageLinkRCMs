@@ -155,8 +155,8 @@ class PPEmbedDataset(Dataset):
                 edge = edge.id
             if i < len(path) - 1:
                 row.append(lid2idx[edge])
-                col.append(lid2idx[path[i+1]])
-        adj_matrix = coo_matrix((np.ones(len(row)), (row, col)), shape=(self.link_num, self.link_num), dtype=np.float32).to_csr()
+                col.append(lid2idx[path[i+1].id])
+        adj_matrix = coo_matrix((np.ones(len(row)), (row, col)), shape=(self.link_num, self.link_num), dtype=np.float32).tocsr()
         return adj_matrix
     
     def get_dataset_from_logits(self, logits):

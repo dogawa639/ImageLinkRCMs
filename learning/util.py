@@ -31,7 +31,7 @@ def get_models(model_names, nw_data, output_channel, emb_dim, in_emb_dim, drop_o
         elif model_name == "CNNEnc":
             models.append(CNNEnc(patch_size, emb_dim, num_source=num_source, sln=sln, w_dim=w_dim))
         elif model_name == "CNNWEnc":
-            models.append(CNNWEnc(nw_data.feature_num, w_dim))
+            models.append(CNNWEnc(nw_data.feature_num + nw_data.context_feature_num, w_dim))
         elif model_name == "GNNWEnc":
             adj_matrix = torch.tensor(nw_data.edge_graph).to(torch.float32)
             models.append(GNNWEnc(nw_data.feature_num, emb_dim, w_dim, adj_matrix))

@@ -115,13 +115,17 @@ class GNNDis(nn.Module):
 
         self.w = None
 
-    def forward(self, x, bs, pi, w=None, i=None):
+    def forward(self, x, pi, w=None, i=None):
         # x: (trip_num, link_num, feature_num) or (link_num, feature_num)
         # pi: (trip_num, link_num, link_num, oc)
         # output: (trip_num, link_num, link_num)
         if w is not None:
             self.w = w
-        x_rep = x.expand(bs, x.shape[-2], x.shape[-1])
+        bs = pi.shape[0]
+        if x.dim() == 2:
+            x_rep = x.expand(bs, x.shape[-2], x.shape[-1])
+        else:
+            x_rep = x
         if i is None:
             f_val = None
             for j in range(self.output_channel):
@@ -158,48 +162,6 @@ class GNNDis(nn.Module):
     def set_w(self, w):
         self.w = w
 
-
-# test
-if __name__ == "__main__":
-    from preprocessing.network import *
-    from utility import *
-
-    device = "mps"
-    node_path = '/Users/dogawa/Desktop/bus/estimation/model/node.csv'
-    link_path = '/Users/dogawa/Desktop/bus/estimation/model/link.csv'
-    link_prop_path = '/Users/dogawa/Desktop/bus/estimation/model/link_attr_min.csv'
-    model_dir = "/Users/dogawa/PycharmProjects/ImageLinkRCM/trained_models"
-    nw_pickle_cnn = "/Users/dogawa/PycharmProjects/ImageLinkRCM/binary/nw_data_cnn.pkl"
-
-    bs = 3
-    input_channel = 5
-    output_channel = 2
-    emb_dim = 2
-    w_dim = 5
-    enc_dim = 3
-    w = torch.randn(bs, w_dim).to(device)
-
-    nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
-
-    f = nw_data.feature_num
-    c = nw_data.context_feature_num
-
-    dis = CNNDis(nw_data, output_channel, gamma=0.9, max_num=40, sln=True, w_dim=w_dim, ext_coeff=1.0).to(device)
-
-    inputs = torch.randn(bs, f+c, 3, 3).to(device)
-    pi = torch.randn(bs, output_channel, 3, 3).to(device)
-    dis.set_w(w)
-    out = dis(inputs, pi, i=0)
-    out2 = dis(inputs, pi, i=1)
-    print(out.shape, out2.shape)
-
-    dis = GNNDis(nw_data, emb_dim, output_channel,
-                 gamma=0.9, in_emb_dim=int(emb_dim/2), num_head=3, dropout=0.0, depth=2, sn=True, sln=True, w_dim=w_dim, ext_coeff=1.0).to(device)
-    inputs = torch.randn(nw_data.link_num, nw_data.feature_num).to(device)
-    pi = torch.randn(bs, nw_data.link_num, nw_data.link_num, output_channel).to(device)
-    dis.set_w(w)
-    out = dis(inputs, bs, pi, i=0)
-    print(out.shape)
 
 
 
