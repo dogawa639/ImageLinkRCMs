@@ -41,7 +41,7 @@ if __name__ == "__main__":
     model_dir = read_save["model_dir"]
     log_dir = read_save["log_dir"]
 
-    TRINING = False
+    TRINING = True
     TESTING = True
     EARLY_STOP = True
     SAVE_MODEL = True
@@ -53,14 +53,14 @@ if __name__ == "__main__":
     one_hot_data = load_json(onehot_data_path)
     base_dirs_h = [os.path.join(onehot_data_dir, x["name"]) for x in one_hot_data]
 
-    l_coeff = 0.001
+    l_coeff = 0.000001
 
     kwargs = {"expansion": 1,
               "crop": True,
               "affine": True,
               "transform_coincide": True,
               "flip": True}
-    loader_kwargs = {"batch_size": 64,
+    loader_kwargs = {"batch_size": 8,
                      "shuffle": True,
                      "num_workers": 2,
                      "pin_memory": True,

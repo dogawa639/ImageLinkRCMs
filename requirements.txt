@@ -22,6 +22,8 @@ scipy
 seaborn
 shapely
 torchaudio
+torchinfo
 torchvision
 tqdm
+ultralytics
 

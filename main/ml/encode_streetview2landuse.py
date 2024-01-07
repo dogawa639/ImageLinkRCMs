@@ -53,14 +53,14 @@ if __name__ == "__main__":
     one_hot_data = load_json(onehot_data_path)
     base_dirs_h = [os.path.join(onehot_data_dir, x["name"]) for x in one_hot_data]
 
-    l_coeff = 0.001
+    l_coeff = 0.000001
 
     kwargs = {"expansion": 1,
               "crop": True,
               "affine": True,
               "transform_coincide": True,
               "flip": True}
-    loader_kwargs = {"batch_size": 32,
+    loader_kwargs = {"batch_size": 8,
                      "shuffle": True,
                      "num_workers": 2,
                      "pin_memory": True,
@@ -86,7 +86,7 @@ if __name__ == "__main__":
         out = F.softmax(out, dim=1)
         return torch.sum((out - y) ** 2)
 
-    logger = Logger(os.path.join(log_dir, "st2lu.json"), CONFIG)
+    logger = Logger(os.path.join(log_dir, f"{case_name}.json"), CONFIG)
     model_path = os.path.join(model_dir, "st2lu.pth")
     if TRINING:
         # train, val

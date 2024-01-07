@@ -110,7 +110,7 @@ if __name__ == "__main__":
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
 
-        logger = Logger(os.path.join(log_dir, "st2lu.json"), CONFIG)
+        logger = Logger(os.path.join(log_dir, "st2lu_traintest.json"), CONFIG)
         for epoch in range(3):
             model.train()
             tmp_loss = 0.0

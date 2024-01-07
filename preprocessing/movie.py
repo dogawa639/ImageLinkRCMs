@@ -3,6 +3,7 @@ import torchvision
 from torch import tensor
 from torchvision.utils import draw_bounding_boxes
 from torchvision.models import detection
+from ultralytics import YOLO
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,8 +20,10 @@ __all__ = ["YoLoV5Detect", "ByteTrack"]
 
 class YoLoV5Detect:
     model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+    #model = torch.hub.load('ultralytics/yolov5', 'yolov5s6', pretrained=True)
+    #model = YOLO('yolov8n.pt')
 
-    def __init__(self, start_time=None, img_points=None, xy_points=None, batch_size=32, device="cpu"):
+    def __init__(self, start_time=None, img_points=None, xy_points=None, batch_size=1, device="cpu"):
         # img_points, xy_points: ndarray(4, 2)
         # img_points: in [0,1]
         self.start_time = start_time
@@ -49,7 +52,7 @@ class YoLoV5Detect:
         if cap.isOpened():
             x = []
             objs = [[[] for _ in range(frame_cnt)] for _ in range(len(idxs))]  # [[(x1, y1, x2, y2, conf)]]
-            expansion = tensor([[width, height, width, height]]).to(self.device)
+            expansion = tensor([[width, height, width, height]])
             for i in range(frame_cnt):
                 ret, frame = cap.read()
                 if ret == True:
@@ -58,16 +61,23 @@ class YoLoV5Detect:
                     x.append(frame)
                     if i % self.batch_size == self.batch_size - 1 or i == frame_cnt - 1:
                         self.model.eval()
-                        results = self.model(x)
-                        xyxyn = results.xyxyn  # (batch_size, detect_num, 6) 6: (x1, y1, x2, y2, conf, class)
+                        try:
+                            results = self.model(x)
+                        except RuntimeError:
+                            print(f"RuntimeError {i}")
+                            break
+                        xyxyn = [xyxy.detach().cpu() for xyxy in results.xyxyn]  # (batch_size, detect_num, 6) 6: (x1, y1, x2, y2, conf, class)
                         bs = len(xyxyn)
                         for j in range(bs):
                             for k, idx in enumerate(idxs):
-                                target_idx = (xyxyn[j][:, 5] == idx) & (xyxyn[j][:, 4] > threshold)
-                                objs[k][i - bs + j + 1] = xyxyn[j][target_idx, 0:5]
+                                xyxynj = xyxyn[j]
+                                xyxynj = xyxynj[(xyxynj[:, 2] > xyxynj[:, 0]) & (xyxynj[:, 3] > xyxynj[:, 1])]
+
+                                target_idx = (xyxynj[:, 5] == idx) & (xyxynj[:, 4] > threshold)
+                                objs[k][i - bs + j + 1] = xyxynj[target_idx, 0:5]
                                 if out_mov_path is not None:
                                     with_bb = draw_bounding_boxes(tensor(x[j].transpose(2, 0, 1)),
-                                                                  xyxyn[j][target_idx, 0:4] * expansion,
+                                                                  xyxynj[target_idx, 0:4] * expansion,
                                                                   colors=colors[k],
                                                                   width=3)
                                     out.write(with_bb.detach().cpu().numpy().transpose(1, 2, 0))  # (h, w, c)

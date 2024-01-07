@@ -34,7 +34,7 @@ if __name__ == "__main__":
     model_dir = read_save["model_dir"]
     log_dir = read_save["log_dir"]
 
-    TRINING = True
+    TRINING = False
     TESTING = True
     EARLY_STOP = True
     SAVE_MODEL = True
@@ -160,29 +160,36 @@ if __name__ == "__main__":
         tmp_loss = 0.0
         # (img_tensor_x, transformed_x, mask_x, idx_x)
         sample_num = 3
+        cnt = 0
+        img_shape = None  # (h,w)
         fig1 = plt.figure()
         fig2 = plt.figure()
         for i, (batch_x, batch_h) in enumerate(test_dataloader):
             batch_x[0] = batch_x[0].to(device)
             batch_h[0] = batch_h[0].to(device)
-            batch_x[2] = batch_x[2].to(device)
             out = model(batch_x[0])["out"]  # (N, C, H, W)
-            loss = torch.sum(loss_fn(out, batch_h[0]) * batch_x[2])
+            loss = loss_fn(out, batch_h[0])
             tmp_loss += loss.clone().cpu().detach().item()
-            if i < sample_num:
-                ax = fig1.add_subplot(sample_num, 1, i + 1)
-                mi = batch_x[0][0].cpu().detach().numpy().min()
-                ma = batch_x[0][0].cpu().detach().numpy().max()
-                ax.imshow(((batch_x[0][0].cpu().detach().numpy().transpose(1, 2, 0) - mi) / (ma - mi) * 255).astype(np.uint8))
-                ax.set_title(f"original_{i}")
-                ax = fig2.add_subplot(sample_num, 2, i * 2 + 1)
-                ax.imshow(out[0].argmax(0).cpu().detach().numpy())
-                ax.set_title(f"predicted_{i}")
-                ax = fig2.add_subplot(sample_num, 2, i * 2 + 2)
-                ax.imshow(batch_h[0][0].cpu().detach().numpy())
-                ax.set_title(f"ground_truth_{i}")
+            if img_shape is None:
+                img_shape = batch_x[1].shape[2:]
+            if cnt < sample_num:
+                for j in range(len(batch_x[0])):
+                    cnt += 1
+                    ax = fig1.add_subplot(sample_num, 1, cnt)
+                    mi = batch_x[0][j].cpu().detach().numpy().min()
+                    ma = batch_x[0][j].cpu().detach().numpy().max()
+                    ax.imshow(((batch_x[0][j].cpu().detach().numpy().transpose(1, 2, 0) - mi) / (ma - mi) * 255).astype(np.uint8))
+                    ax.set_title(f"original_{cnt}")
+                    ax = fig2.add_subplot(sample_num, 2, cnt * 2 - 1)
+                    ax.imshow(out[j].argmax(0).cpu().detach().numpy())
+                    ax.set_title(f"predicted_{cnt}")
+                    ax = fig2.add_subplot(sample_num, 2, cnt * 2)
+                    ax.imshow(batch_h[0][j].cpu().detach().numpy())
+                    ax.set_title(f"ground_truth_{cnt}")
+                    if cnt >= sample_num:
+                        break
         test_loss = tmp_loss / test_data_num
-        print(f"test_loss: {test_loss}")
+        print(f"test_loss: {test_loss / img_shape[0] / img_shape[1]}")
         logger.add_prop("test_loss", test_loss)
 
         fig1.savefig(os.path.join(log_dir, f"{case_name}_original.png"))

@@ -3,6 +3,7 @@ if __name__ == "__main__":
     import os
     import numpy as np
     import datetime
+    import time
     from preprocessing.movie import YoLoV5Detect, ByteTrack
 
     CONFIG = "../../config/config_test.ini"
@@ -21,12 +22,15 @@ if __name__ == "__main__":
     xy_points = np.array([[-69266.30906479518, 93476.6843737138], [-69260.76750148823, 93480.99447847917],
                           [-69260.67954013556, 93476.06864445977], [-69268.68402048285, 93492.07760501398]],
                          dtype=np.float32)
-    detection = YoLoV5Detect(start_time=start_time, img_points=img_points, xy_points=xy_points, batch_size=16,
+    detection = YoLoV5Detect(start_time=start_time, img_points=img_points, xy_points=xy_points, batch_size=1,
                              device="mps")
-    #detection.get_clip(os.path.join(camera_data_dir, "調査地点①/220928/20220928-224129MA.mp4"), os.path.join(movie_dir, "cap_1.png"), 0)
-    #detection.detect(os.path.join(camera_data_dir, "調査地点①/220928/20220928-224129MA.mp4"), [0], out_csv_dir=movie_dir, out_mov_path=os.path.join(movie_dir, "people.mp4"))
+    detection.get_clip(os.path.join(camera_data_dir, "調査地点①/220928/20220928-224129MA.mp4"), os.path.join(movie_dir, "cap_1.png"), 0)
+    t1 = time.perf_counter()
+    detection.detect(os.path.join(camera_data_dir, "調査地点①/220928/20220928-224129MA.mp4"), [0], out_csv_dir=movie_dir, out_mov_path=os.path.join(movie_dir, "people.mp4"))
+    t2 = time.perf_counter()
+    print(f"Detection time: {t2 - t1}")
 
-    bytetrack = ByteTrack(1. / 25.)
+    bytetrack = ByteTrack(3. / 25.)
     bytetrack.track(os.path.join(movie_dir, "yolov_out_0.csv"), os.path.join(movie_dir, "byte_out_0.csv"))
 
     detection.mapping2xy(os.path.join(movie_dir, "byte_out_0.csv"),
