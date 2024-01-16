@@ -30,11 +30,19 @@ if __name__ == "__main__":
 
     gen = CNNGen(nw_data, output_channel, w_dim=w_dim).to(device)
 
+    gen.train()
     inputs = torch.randn(bs, f + c, 3, 3).to(device)
     w = torch.randn(w_dim).to(device)
     gen.set_w(w)
     out = gen(inputs, i=0)
     out2 = gen(inputs, i=1)
+
+    out12 = torch.randn_like(out)
+    loss = torch.norm(torch.max(out - out12, torch.tensor(-50.0, device=device)))
+    loss.backward()
+    print("cnn grad")
+    for param in gen.parameters():
+        print(param.grad)
 
     w = torch.randn(2 * bs, w_dim).to(device)
     out3 = gen.generate([bs, bs], w=w)
@@ -49,12 +57,20 @@ if __name__ == "__main__":
     gen = GNNGen(nw_data, emb_dim, output_channel, enc_dim, in_emb_dim=int(emb_dim / 2), num_head=2, dropout=0.1,
                  depth=2, pre_norm=False, sn=True, sln=True, w_dim=w_dim).to(device)
 
+    gen.train()
     inputs = torch.randn(bs, len(nw_data.lids), nw_data.feature_num).to(device)
     w = torch.randn(w_dim).to(device)
     gen.set_w(w)
     out = gen(inputs, i=0)
     out2 = gen(inputs, i=1)
     print(out.shape, out2.shape)
+
+    out12 = torch.randn_like(out)
+    loss = torch.norm(torch.max(out - out12, torch.tensor(-50.0, device=device)))
+    loss.backward()
+    print("gnn grad")
+    for param in gen.parameters():
+        print(param.grad)
 
     out = F.softmax(out, dim=2)
     plt.imshow(out[0].detach().cpu().numpy())

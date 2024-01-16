@@ -27,8 +27,13 @@ if __name__ == "__main__":
     link_prop_path = read_data["link_prop_path"]
 
     pp_path = json.loads(read_data["pp_path"])  # list(str)
+    image_data_dir = read_data["satellite_image_datadir"]  # str or None
     image_data_path = read_data["image_data_path"] # str or None
     image_data_path = None if image_data_path == "null" else image_data_path
+    onehot_data_dir = read_data["onehot_image_datadir"]  # str or None
+    onehot_data_path = read_data["onehot_data_path"]  # str or None
+    onehot_data_path = None if onehot_data_path == "null" else onehot_data_path
+
     # train setting
     read_train = config["TRAIN"]
     bs = int(read_train["bs"])  # int
@@ -44,6 +49,7 @@ if __name__ == "__main__":
     read_model = config["MODELSETTING"]
     use_f0 = bool(read_model["use_f0"])  # bool
     emb_dim = int(read_model["emb_dim"])  # int
+    enc_dim = int(read_model["enc_dim"])  # int
     in_emb_dim = json.loads(read_model["in_emb_dim"])  # int or None
     drop_out = float(read_model["drop_out"])  # float
     sn = bool(read_model["sn"])  # bool
@@ -78,11 +84,10 @@ if __name__ == "__main__":
         datasets = [GridDataset(pp, h_dim=h_dim) for pp in pp_list]
     else:
         datasets = [PPEmbedDataset(pp, h_dim=h_dim) for pp in pp_list]
-    image_data = None
-    num_source = 0
-    if image_data_path is not None:
-        image_data = SatelliteImageData(image_data_path)
-        num_source = len(image_data)
+    image_data_list = [os.path.join(image_data_dir, "satellite_image_processed.json"), os.path.join(onehot_data_dir, "onehot_image_processed.json")]
+    image_data_list = [LinkImageData(image_data, nw_data) for image_data in image_data_list]
+    image_data = CompressedImageData(image_data_list)
+
     # model_names : [str] [discriminator, generator, (f0, w_encoder), (encoder)]
     model_names = ["CNNDis", "CNNGen"] if model_type == "cnn" else ["GNNDis", "GNNGen"]
     if use_f0:
@@ -95,6 +100,7 @@ if __name__ == "__main__":
         "nw_data": nw_data,
         "output_channel": output_channel,
         "emb_dim": emb_dim,
+        "enc_dim": 0,#enc_dim,
         "in_emb_dim": in_emb_dim,
         "drop_out": drop_out,
         "sn": sn,
@@ -107,7 +113,7 @@ if __name__ == "__main__":
         "max_num": max_num,
         "ext_coeff": ext_coeff,
         "patch_size": patch_size,
-        "num_source": num_source
+        "num_source": 1
     }
 
     if not use_f0 and not use_encoder:
@@ -125,7 +131,10 @@ if __name__ == "__main__":
     else:
         discriminator, generator, f0, w_encoder, encoder = get_models(model_names, **kwargs)
 
+    image_data = None
+    encoder = None
+
     airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=image_data, encoder=encoder, h_dim=h_dim, emb_dim=emb_dim, f0=f0,
                  hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, patch_size=patch_size, device=device)
 
-    airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
+    airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, max_train_num=10, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)

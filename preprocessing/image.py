@@ -13,6 +13,8 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import torch
+from torch import tensor
 from torch.utils.data import DataLoader
 import time
 import shutil
@@ -22,7 +24,101 @@ from utility import load_json, dump_json, Coord
 from preprocessing.geo_util import GISSegmentation
 from preprocessing.dataset import PatchDataset
 from preprocessing.geo_util import tile2lonlat
-__all__ = ["SatelliteImageData", "OneHotImageData"]
+from preprocessing.dataset import ImageDatasetBase
+__all__ = ["CompressedImageData", "LinkImageData", "SatelliteImageData", "OneHotImageData"]
+
+
+class CompressedImageData:
+    def __init__(self, link_image_data_list, merge_type="sum"):
+        self.link_image_data_list = link_image_data_list
+        self.link_num = link_image_data_list[0].link_num
+        self.lids = link_image_data_list[0].lids
+        self.link_num = len(self.lids)
+
+        self.merge_type = merge_type  # sum or concat
+
+    def __len__(self):
+        return self.link_num
+
+    def load_compressed(self, idx):
+        # idx: int
+        # compressed: npy
+        # return list of compressed(None or tensor)
+        compressed = None
+        for link_image_data in self.link_image_data_list:
+            compressed_tmp = link_image_data.load_compressed(idx)
+            if compressed_tmp is None:
+                continue
+            if self.merge_type == "concat":
+                compressed_tmp = np.expand_dims(compressed_tmp, 0)
+            if compressed is None:
+                compressed = compressed_tmp
+            elif self.merge_type == "sum":
+                compressed += compressed_tmp
+            elif self.merge_type == "concat":
+                compressed = np.concatenate((compressed, compressed_tmp), axis=0)
+        return compressed
+
+
+class LinkImageData:
+    # load link images from data_dir
+    # data_dir - name - link_id.png
+    image_dataset_base = ImageDatasetBase(crop=False, affine=False, transform_coincide=False, flip=False)
+    def __init__(self, data_file, nw_data):
+        self.data_list = load_json(data_file)
+        self.nw_data = nw_data
+        self.lids = nw_data.lids
+        self.link_num = len(self.lids)
+
+    def __len__(self):
+        return len(self.data_list)
+
+    def load_image(self, idx):
+        # idx: int
+        # image: (3, H, W) RGB or (H, W) gray
+        # return: list of image(None or tensor (3, H, W) RGB or (H, W) gray)
+        images = []
+        for data in self.data_list:
+            if "data_dir" in data:
+                path = os.path.join(data["data_dir"], f"{self.lids[idx]}.png")
+                image = None
+                if os.path.exists(path):
+                    image = self.image_dataset_base.preprocess(Image.open(path))
+                images.append(image)
+            else:
+                print(f"No data dir is set for {data}.")
+        return images
+
+    def load_compressed(self, idx):
+        # idx: int
+        # compressed: npy
+        # return list of compressed(None or tensor)
+        compressed = None
+        for data in self.data_list:
+            if "data_dir" in data:
+                path = os.path.join(data["data_dir"], f"{self.lids[idx]}.npy")
+                if os.path.exists(path):
+                    tmp_compressed = np.load(path).astype(np.float32)
+                    if compressed is None:
+                        compressed = tmp_compressed
+                    else:
+                        compressed = compressed + tmp_compressed
+        return compressed
+
+    def compress_images(self, encoder, device="cpu"):
+        # no backward process
+        encoder = encoder.to(device)
+        for data in self.data_list:
+            if "data_dir" in data:
+                tmp_dir = data["data_dir"]
+                for i, lid in enumerate(self.lids):
+                    path = os.path.join(tmp_dir, f"{lid}.png")
+                    if os.path.exists(path):
+                        encoder.eval()
+                        image = self.image_dataset_base.preprocess(Image.open(path))
+                        image = image.unsqueeze(0).to(device)
+                        compressed = encoder(image).detach().cpu().numpy().flatten()
+                        np.save(os.path.join(tmp_dir, f"{lid}.npy"), compressed)
 
 
 # 画像データの読み込み，座標付与
