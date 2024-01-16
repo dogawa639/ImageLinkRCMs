@@ -11,7 +11,7 @@ if __name__ == "__main__":
     from models.deeplabv3 import deeplabv3_resnet50, resnet50, classifier_resnet50, ResNet50_Weights
 
     from learning.encoder import *
-    from utility_kalmanfilter import *
+    from utility import *
     from logger import Logger
 
     CONFIG = "../../config/config_test.ini"

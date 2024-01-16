@@ -45,8 +45,8 @@ class PP:
 
     def split_into(self, ratio):
         # ratio: [train, val, test] sum = 1
-        if sum(ratio) != 1:
-            raise ValueError("The sum of ratio must be 1.")
+        if sum(ratio) > 1:
+            raise ValueError("The sum of ratio must be less or equal to 1.")
         trip_nums = (len(self.path_dict) * np.array(ratio)).astype(int)
         trip_nums = trip_nums.cumsum()
         trip_nums[-1] = len(self.path_dict)
@@ -167,10 +167,11 @@ class PP:
     @staticmethod
     def map_matching(trip_path, feeder_path, loc_path, nw_data, mode_code, out_file=None, thresh=60, dist_thresh=None, loc_time_format="%Y-%m-%d %H:%M:%S.%f", feeder_time_format="%Y-%m-%d %H:%M:%S", trip_time_format="%Y-%m-%d %H:%M:%S"):
         # thresh: sec to regard as the separated trip
+        # output: df [ID, k, a, b, org, uid, mode, purpose]
         coord = Coord(nw_data.utm_num)
-        trip_data = read_csv(trip_path)  # ID,ユーザーID,作成日時,出発時刻,到着時刻,更新日時,有効性,目的コード（active）
-        feeder_data = read_csv(feeder_path)  # ID,トリップID,ユーザーID,作成日時,操作タイプ(1:出発、5:移動手段変更),更新日時,有効性,移動手段コード,記録日時
-        loc_data = read_csv(loc_path)  # ID,accuracy,bearing,speed,ユーザーID,作成日時,経度,緯度,記録日時,高度
+        trip_data = read_csv(trip_path)  # ID,ユーザーID[,作成日時],出発時刻,到着時刻[,更新日時,有効性],目的コード（active）
+        feeder_data = read_csv(feeder_path)  # ID,トリップID,ユーザーID[,作成日時,操作タイプ(1:出発、5:移動手段変更),更新日時,有効性],移動手段コード,記録日時
+        loc_data = read_csv(loc_path)  # ID[,accuracy,bearing,speed,ユーザーID,作成日時],経度,緯度,記録日時[,高度]
         if type(mode_code) is int:
             mode_code = {mode_code}
 
@@ -252,11 +253,12 @@ class PP:
             target = loc_data[loc_data["ユーザーID"] == uid]
             user_loc_data[uid].set_points(target["記録日時"].values, target[["x", "y"]].values)
 
-        result = []  # [seq, k, a, b, tid] k, a, b: link_id
+        result = []  # [ID, k, a, b, org, uid, mode, purpose] k, a, b: link_id
         seq = 1
         for idx in trip_data.index:
             tid = trip_data.loc[idx, "ID"]
             uid = trip_data.loc[idx, "ユーザーID"]
+            purpose = trip_data.loc[idx, "目的コード（active）"]
             # feeder 記録日時 is departure time of the unlinked trip
             # trip 到着時刻 is arrival time of the linked trip
             end_time = trip_data.loc[idx, "到着時刻"]
@@ -266,6 +268,7 @@ class PP:
                 feeder_dep_time = feeder_tmp.loc[f_idx, "記録日時"]
                 if feeder_tmp.loc[f_idx, "移動手段コード"] not in mode_code:
                     continue
+                mode = feeder_tmp.loc[f_idx, "移動手段コード"]
                 if j < len(feeder_tmp) - 1:
                     feeder_end_time = feeder_tmp.loc[feeder_tmp.index[j+1], "記録日時"]
                 else:
@@ -312,11 +315,14 @@ class PP:
                         passed_links[lid] = k
 
                     if len(path) > 1:
-                        tmp_result = [[seq, path[i], path[i+1], path[-1], tid] for i in range(len(path)-1) if path[i] != path[i+1]]
+                        tmp_result = [[seq, path[i], path[i+1], path[-1], tid, uid, mode, purpose] for i in range(len(path)-1) if path[i] != path[i+1]]
                         if len(tmp_result) > 0:
                             result.extend(tmp_result)
                             seq += 1
-        df = pd.DataFrame(result, columns=["ID", "k", "a", "b", "org"]).astype(int)  # original trip id is org
+        if len(result) > 0:
+            df = pd.DataFrame(result, columns=["ID", "k", "a", "b", "org", "uid", "mode", "purpose"]).astype(int)  # original trip id is org
+        else:
+            df = pd.DataFrame(columns=["ID", "k", "a", "b", "org", "uid", "mode", "purpose"]).astype(int)
         if out_file is not None:
             df.to_csv(out_file, index=False)
         return df

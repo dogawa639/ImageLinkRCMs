@@ -308,6 +308,7 @@ class NetworkBase:
             for lid in path:
                 props[cnt] += self.edges[lid].prop[prop]
             cnt += 1
+        return props / (len(path) + (len(path) == 0))
 
     def get_sc_params_node(self):
         return self.sc_node.mean_, self.sc_node.scale_

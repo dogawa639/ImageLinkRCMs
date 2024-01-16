@@ -34,8 +34,10 @@ if __name__ == "__main__":
             loc_path = os.path.join(root, "t_loc_data.csv")
             feeder_path = os.path.join(root, "t_locfeeder.csv")
             trip_path = os.path.join(root, "t_trip.csv")
-            mode_code_walk = 100
-            mode_code_car = {300, 310, 320}
+            #mode_code_walk = 100  # for matsuyama-shinjuku
+            #mode_code_car = {300, 310, 320}  # for matsuyama-shinjuku
+            mode_code_walk = 420
+            mode_code_car = {100, 300}
             if not USEEXIST:
                 nw_data.set_mode("ped")
                 pp_df_walk_tmp = PP.map_matching(trip_path, feeder_path, loc_path, nw_data, mode_code_walk,

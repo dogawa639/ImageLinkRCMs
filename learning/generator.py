@@ -1,6 +1,7 @@
 import torch
 from torch import tensor, nn, optim
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 from models.cnn import CNN3x3
 from models.gnn import GT
 from models.general import FF, SLN
@@ -8,23 +9,29 @@ from models.general import FF, SLN
 import numpy as np
 
 
+# CNN
+# input: (sum(links), total_feature, 3, 3)
+# output: (sum(links), 3, 3) or (sum(links), oc, 3, 3)
+# GNN
+# input: (bs, link_num, feature_num)
+# output: (bs, link_num, link_num) or (trip_num, oc, link_num, link_num)
 class CNNGen(nn.Module):
-    def __init__(self, nw_data, output_channel, max_num=40, sln=True, w_dim=10):
+    def __init__(self, nw_data, output_channel, image_feature_num=0, max_num=40, sln=True, w_dim=10):
         super().__init__()
 
         self.nw_data = nw_data
         self.output_channel = output_channel
+        self.image_feature_num = image_feature_num
         self.max_num = max_num
 
-        self.total_feature = self.nw_data.feature_num + self.nw_data.context_feature_num
+        self.total_feature = self.nw_data.feature_num + self.nw_data.context_feature_num + self.image_feature_num
         self.cnn = CNN3x3((3, 3), (self.total_feature, self.total_feature*4, self.output_channel), residual=True, sn=False, sln=sln, w_dim=w_dim)  # forward: (B, C, 3, 3)->(B, C', 3, 3)
 
         self.w = None
 
     def forward(self, inputs, w=None, i=None):
         # inputs: (sum(links), total_feature, 3, 3)
-        # output: (sum(links), 3, 3)
-        # model output: (sum(links), oc, 3, 3)
+        # output: (sum(links), 3, 3) or (sum(links), oc, 3, 3)
         if w is not None:
             self.w = w
         if i is not None:
@@ -43,9 +50,9 @@ class CNNGen(nn.Module):
 
         device = next(self.cnn.covs[0].parameters()).device
 
-        tmp_links = np.random.choice(self.nw_data.lids, sum(num))
-        d_nodes = np.random.choice(self.nw_data.nids, sum(num))
-        mode = np.array([m for m in range(self.output_channel) for i in range(num[m])])
+        tmp_links = np.random.choice(self.nw_data.lids, sum(num))  # [link_id]
+        d_nodes = np.random.choice(self.nw_data.nids, sum(num))  # [d_node_id]
+        mode = np.array([m for m in range(self.output_channel) for i in range(num[m])])  # [mode]
         paths = [[l] for l in tmp_links]
         pids = np.array([i for i in range(sum(num))])  # i th element: pid of i th link
 
@@ -98,7 +105,9 @@ class CNNGen(nn.Module):
                     fake_data[mode][n] = {"d_node": d_nodes[pid], "path": paths[pid]}
         return fake_data
 
+
     def set_w(self, w):
+        # w : (w_dim)
         self.w = w
 
     def save(self, model_dir):
@@ -110,7 +119,7 @@ class CNNGen(nn.Module):
 
 class GNNGen(nn.Module):
     def __init__(self, nw_data, emb_dim, output_channel, enc_dim, 
-                 in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None):
+                 image_feature_num=0, in_emb_dim=None, num_head=1, dropout=0.0, depth=1, pre_norm=False, sn=False, sln=False, w_dim=None):
         super().__init__()
         if sln and w_dim is None:
             raise Exception("w_dim should be specified when sln is True")
@@ -118,6 +127,7 @@ class GNNGen(nn.Module):
         self.nw_data = nw_data
         self.emb_dim = emb_dim
         self.feature_num = nw_data.feature_num
+        self.image_feature_num = image_feature_num
         self.output_channel = output_channel
         self.adj_matrix = nn.parameter.Parameter(tensor(nw_data.edge_graph).to(torch.float32).to_dense(), requires_grad=False)
         self.sln = sln
@@ -135,7 +145,7 @@ class GNNGen(nn.Module):
             "sln": sln, 
             "w_dim": w_dim
             }
-        self.gnn = GT(self.feature_num, emb_dim, self.adj_matrix, **kwargs)  # (bs, link_num, emb_dim)
+        self.gnn = GT(self.feature_num + self.image_feature_num, emb_dim, self.adj_matrix, **kwargs)  # (bs, link_num, emb_dim)
         self.ff = FF(emb_dim*2, output_channel, emb_dim*4, sn=sn)
 
         self.w = None
@@ -158,6 +168,7 @@ class GNNGen(nn.Module):
             return logits[:, i, :, :]
 
     def set_w(self, w):
+        # w : (trip_num, w_dim)
         self.w = w
 
     def save(self, model_dir):
@@ -166,45 +177,5 @@ class GNNGen(nn.Module):
     def load(self, model_dir):
         self.load_state_dict(torch.load(model_dir + "/gnngen.pth"))
 
-
-# for test
-if __name__ == "__main__":
-    from preprocessing.network import *
-
-    device = "mps"
-    node_path = '/Users/dogawa/Desktop/bus/estimation/model/node.csv'
-    link_path = '/Users/dogawa/Desktop/bus/estimation/model/link.csv'
-    link_prop_path = '/Users/dogawa/Desktop/bus/estimation/model/link_attr_min.csv'
-    model_dir = "/Users/dogawa/PycharmProjects/ImageLinkRCM/trained_models"
-    bs = 10
-    output_channel = 2
-    emb_dim = 4
-    enc_dim = 3
-    w_dim = 5
-    nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
-    f = nw_data.feature_num
-    c = nw_data.context_feature_num
-    print(f"f: {f}, c: {c}")
-
-    gen = CNNGen(nw_data, output_channel, w_dim=w_dim).to(device)
-
-    inputs = torch.randn(bs, f+c, 3, 3).to(device)
-    w = torch.randn(w_dim).to(device)
-    gen.set_w(w)
-    out = gen(inputs, i=0)
-    out2 = gen(inputs, i=1)
-
-    w = torch.randn(2*bs, w_dim).to(device)
-    out3 = gen.generate([bs, bs], w=w)
-    print(out.shape, out2.shape)
-
-    gen = GNNGen(nw_data, emb_dim, output_channel, enc_dim, in_emb_dim=int(emb_dim/2), num_head=2, dropout=0.1, depth=2, pre_norm=False, sn=True, sln=True, w_dim=w_dim).to(device)
-
-    inputs = torch.randn(bs, len(nw_data.lids), nw_data.feature_num).to(device)
-    w = torch.randn(w_dim).to(device)
-    gen.set_w(w)
-    out = gen(inputs, i=0)
-    out2 = gen(inputs, i=1)
-    print(out.shape, out2.shape)
 
 

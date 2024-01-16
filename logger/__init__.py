@@ -67,7 +67,7 @@ class Logger:
         for i in range(prop_num):
             ax = self.fig.add_subplot(prop_num, 1, i + 1)
             if len(v_list[i]) == 1:
-                if type(v_list[i]) is np.array:
+                if type(v_list[i]) is np.ndarray:
                     ax.scatter([0] * len(v_list[i][0]), v_list[i][0], label=label_list[i])
                 else:
                     ax.scatter([0], v_list[i], label=label_list[i])
@@ -104,7 +104,7 @@ class Logger:
         for i in range(prop_num):
             ax = fig.add_subplot(prop_num, 1, i+1)
             if len(v_list[i]) == 1:
-                if type(v_list[i]) is np.array:
+                if type(v_list[i]) is np.ndarray:
                     ax.scatter([0] * len(v_list[i][0]), v_list[i][0], label=label_list[i])
                 else:
                     ax.scatter([0], v_list[i], label=label_list[i])

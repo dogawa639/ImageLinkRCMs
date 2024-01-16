@@ -103,7 +103,7 @@ class GridDataset(Dataset):
         next_link_prob = F.softmax(logits, dim=-1)
         next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()
         next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
-        return real_batch[0], real_batch[1], next_links_one_hot
+        return [real_batch[0], real_batch[1], next_links_one_hot]
 
 
 class PPEmbedDataset(Dataset):
@@ -112,6 +112,7 @@ class PPEmbedDataset(Dataset):
     def __init__(self, pp_data, h_dim=10):
         # global state: output of GNN
         self.pp_data = pp_data
+        self.h_dim = h_dim
         self.nw_data = pp_data.nw_data
         self.feature_mat = self.nw_data.get_feature_matrix()
         self.link_num, self.feature_num = self.feature_mat.shape
@@ -125,12 +126,12 @@ class PPEmbedDataset(Dataset):
         return len(self.pp_data)
     
     def __getitem__(self, idx):
-        kwargs = {"dtype": torch.float32, "retain_grad": False}
+        kwargs = {"dtype": torch.float32, "requires_grad": False}
         # [link_num, feature_num], [link_num, link_num]
-        return (tensor(self.feature_mat, **kwargs),
-                tensor(self.nw_data.a_matrix.toarray(), **kwargs).to_sparse(),  #隣接行列
-                tensor(self.pp_adj_matrices[idx].toarray(), **kwargs).to_sparse(),
-                tensor(self.hs[idx], **kwargs))
+        return (tensor(self.feature_mat, **kwargs),  # inputs
+                tensor(self.nw_data.a_matrix.toarray(), **kwargs).to_sparse(),  # 隣接行列
+                tensor(self.pp_adj_matrices[idx].toarray(), **kwargs).to_sparse(),  # next_link_adj_matrix
+                tensor(self.hs[idx], **kwargs))  # h
 
     def get_pp_pos_embedding(self, path):
         # path: [link_id] or [edge obj]
@@ -155,16 +156,16 @@ class PPEmbedDataset(Dataset):
                 edge = edge.id
             if i < len(path) - 1:
                 row.append(lid2idx[edge])
-                col.append(lid2idx[path[i+1]])
-        adj_matrix = coo_matrix((np.ones(len(row)), (row, col)), shape=(self.link_num, self.link_num), dtype=np.float32).to_csr()
+                col.append(lid2idx[path[i+1].id])
+        adj_matrix = coo_matrix((np.ones(len(row)), (row, col)), shape=(self.link_num, self.link_num), dtype=np.float32).tocsr()
         return adj_matrix
     
     def get_dataset_from_logits(self, logits):
         # logits: [trip_num, link_num, link_num] tensor(cpu, detached) each element is real
         # return: PPEmbedDataset
         exp_logits = torch.exp(logits)
-        origin = (exp_logits.sum(axis=1, keepdim=False) > 0) & (exp_logits.sum(axis=2, keepdim=False) == 0)  # どこからも入ってきていないが，出ていっているリンク (trip_num, link_num)
-        origin = origin[(origin.sum(axis=1) > 0), :]  # originがないtripは除く
+        origin = (exp_logits.sum(dim=1, keepdim=False) > 0) & (exp_logits.sum(dim=2, keepdim=False) == 0)  # どこからも入ってきていないが，出ていっているリンク (trip_num, link_num)
+        origin = origin[(origin.sum(dim=1) > 0), :]  # originがないtripは除く
         trip_num = origin.shape[0]
 
         logits_origin = torch.einsum('ijk, ij -> ij', logits, origin)  # (trip_num, link_num)
@@ -199,12 +200,12 @@ class PPEmbedDataset(Dataset):
         pp_data = [[i+1, paths[i][j], paths[i][j+1], paths[i][-1]] for i in range(trip_num) for j in range(len(paths[i]) - 1)]  # ID, a, k, b
         pp_data = PP(pd.DataFrame(pp_data, columns=["ID", "a", "k", "b"]), self.nw_data)
 
-        return PPEmbedDataset(pp_data, self.grobal_state, self.nw_data)
+        return PPEmbedDataset(pp_data, h_dim=self.h_dim)
 
     def split_into(self, ratio):
         # ratio: [train, test, validation]
         pp_data = self.pp_data.split_into(ratio)
-        return [PPEmbedDataset(pp_data[i], self.grobal_state, self.nw_data) for i in range(len(ratio))]
+        return [PPEmbedDataset(pp_data[i], h_dim=self.h_dim) for i in range(len(ratio))]
 
     def get_fake_batch(self, real_batch, g_output):
         mask = real_batch[1]
@@ -212,7 +213,7 @@ class PPEmbedDataset(Dataset):
         next_link_prob = F.softmax(g_output, dim=-1)
         next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()  # (trip_num * link_num)
         next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
-        return real_batch[0], real_batch[1], next_links_one_hot, real_batch[3]
+        return [real_batch[0], real_batch[1], next_links_one_hot, real_batch[3]]
 
 
 class PatchDataset(Dataset):
