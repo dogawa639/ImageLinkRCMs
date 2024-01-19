@@ -70,13 +70,19 @@ if __name__ == "__main__":
             print(param.grad)
 
     if UNet:
+        # input: (bs, total_feature, 2d+1, 2d+1)
+        # positions: (bs, num_agents, output_channel, 2d+1, 2d+1)
+        # pis: (bs, num_agents, output_channel, 2d+1, 2d+1)
+        # f_val, util, val: (bs, 2d+1, 2d+1)
+
         feature_num = 3
-        position_feature_num = 1
+        context_num = 1
+        output_channel = 2
         d = 16
-        dis = UNetDis(feature_num, position_feature_num).to(device)
-        input = torch.randn(bs, feature_num + position_feature_num, 2 * d + 1, 2 * d + 1).to(device)
-        positions = torch.randn(bs, 1, 1, 2 * d + 1, 2 * d + 1).to(device)
-        pis = torch.randn(bs, 1, 2 * d + 1, 2 * d + 1).to(device)
+        dis = UNetDis(feature_num, context_num, output_channel).to(device)
+        input = torch.randn(bs, feature_num + context_num, 2 * d + 1, 2 * d + 1).to(device)
+        positions = torch.randn(bs, 1, output_channel, 2 * d + 1, 2 * d + 1).to(device)
+        pis = torch.randn(bs, 1, output_channel, 2 * d + 1, 2 * d + 1).to(device)
 
         dis.train()
         out = dis(input, positions, pis)
@@ -91,5 +97,5 @@ if __name__ == "__main__":
         for param in dis.parameters():
             print(param.grad)
 
-        print(summary(model=dis.to("cpu"), input_size=[(bs, feature_num + position_feature_num, 2 * d + 1, 2 * d + 1), (bs, 1, 1, 2 * d + 1, 2 * d + 1), (bs, 1, 2 * d + 1, 2 * d + 1)]))
+        print(summary(model=dis.to("cpu"), input_size=[input.shape, positions.shape, pis.shape]))
 

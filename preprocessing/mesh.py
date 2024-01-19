@@ -104,8 +104,8 @@ class MeshNetwork:
         elif type(points) == np.ndarray:
             x_idx = ((points[:, 0] - self.coords[0]) / self.x_size).astype(int)
             y_idx = ((points[:, 1] - self.coords[1]) / self.y_size).astype(int)
-            return [(y_idx[i], x_idx[i]) if contained[i] else None for i in
-                    range(len(points))]  # (num_points, 2)
+            return np.array([[y_idx[i], x_idx[i]] if contained[i] else None for i in
+                    range(len(points))])  # (num_points, 2)
 
     def get_cell(self, points):
         # point: (x, y) or np.array([[x1, y1], [x2, y2], ...])

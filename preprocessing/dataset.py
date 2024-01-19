@@ -24,7 +24,7 @@ from utility import read_csv, load_json, dump_json
 from preprocessing.geo_util import MapSegmentation
 from preprocessing.pp import PP
 
-__all__ = ["GridDataset", "PPEmbedDataset", "PatchDataset", "XImageDataset", "XYImageDataset", "XHImageDataset", "StreetViewDataset", "StreetViewXDataset", "ImageDataset", "calc_loss"]
+__all__ = ["GridDataset", "PPEmbedDataset", "MeshDataset", "PatchDataset", "XImageDataset", "XYImageDataset", "XHImageDataset", "StreetViewDataset", "StreetViewXDataset", "ImageDataset", "calc_loss"]
 
 
 class GridDataset(Dataset):
@@ -217,7 +217,7 @@ class PPEmbedDataset(Dataset):
 
 
 class MeshDataset(Dataset):
-    def __init__(self, mesh_traj_data, d):
+    def __init__(self, mesh_traj_data, d, channel=None):
         # d: the number of grids to be considered in route choice
         # state: (bs, prop_dim, 2d+1, 2d+1)
         # context: (bs, context_num, 2d+1, 2d+1)
@@ -234,7 +234,7 @@ class MeshDataset(Dataset):
         self.trip_nums = mesh_traj_data.get_trip_nums()
         self.times = mesh_traj_data.times
 
-        self.channel = None
+        self.channel = channel
 
         self.common_state = mesh_traj_data.get_state(0)[self.output_channel:, :, :]  # common for all time
         self.common_mask = self.common_state.sum(axis=0) > 0
@@ -245,6 +245,9 @@ class MeshDataset(Dataset):
         self.mask = None
         self.positions = None
         self.pis = None
+
+        if channel is not None:
+            self.set_channel(channel)
 
     def __len__(self):
         if self.channel is None:
@@ -272,6 +275,7 @@ class MeshDataset(Dataset):
         self.positions = torch.zeros((self.trip_nums[channel], self.max_agent_num, self.output_channel, 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
         self.pis = torch.zeros((self.trip_nums[channel], self.max_agent_num, self.output_channel, 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
 
+        cnt = 0
         for i in range(len(self.mesh_traj_data.times)):
             prop = self.mesh_traj_data.get_state(i)[:self.output_channel]  # (prop_dim, H, W)
             idxs, next_idxs, d_idxs = self.mesh_traj_data.get_action(i)  # (output_channel, num_agents, 2)
@@ -281,29 +285,38 @@ class MeshDataset(Dataset):
                 max_y = min(prop.shape[1], idxs[channel][j, 0] + self.d + 1)
                 min_x = max(0, idxs[channel][j, 1] - self.d)
                 max_x = min(prop.shape[2], idxs[channel][j, 1] + self.d + 1)
+                min_y_local = min_y - (idxs[channel][j, 0] - self.d)
+                max_y_local = max_y - (idxs[channel][j, 0] - self.d)
+                min_x_local = min_x - (idxs[channel][j, 1] - self.d)
+                max_x_local = max_x - (idxs[channel][j, 1] - self.d)
 
                 next_x = next_idxs[channel][j, 0] - min_x
                 next_y = next_idxs[channel][j, 1] - min_y
                 next_x = min(max(0, next_x), 2 * self.d)
                 next_y = min(max(0, next_y), 2 * self.d)
 
-                cur_point = self.mnw_data.cells[idxs[channel][j, 0], idxs[channel][j, 1]].center
-                d_point = self.mnw_data.cells[idxs[channel][j, 0], idxs[channel][j, 1]].center
-                dist = self.mnw_data.get_distance_from(d_point)  # (H, W)
+                d_point = self.mnw_data.cells[idxs[channel][j, 0]][idxs[channel][j, 1]].center
+                dist = self.mnw_data.distance_from(d_point)  # (H, W)
 
-                self.state[j, :self.output_channel, :, :] = prop[:, min_y:max_y, min_x:max_x]
-                self.state[j, self.output_channel:,  :, :] = self.common_state[:, min_y:max_y, min_x:max_x]
-                self.context[j, 0, :, :] = dist[min_y:max_y, min_x:max_x]
-                self.next_state[j, next_y, next_x] = 1
-                self.mask[j, :, :] = self.common_state[:, min_y:max_y, min_x:max_x].sum(axis=0) > 0
+                self.state[cnt, :self.output_channel, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(prop[:, min_y:max_y, min_x:max_x])
+                self.state[cnt, self.output_channel:, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.common_state[:, min_y:max_y, min_x:max_x])
+                self.context[cnt, 0, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(dist[min_y:max_y, min_x:max_x])
+                self.next_state[cnt, next_y, next_x] = 1
+                # add other agents at the same time
+                self.mask[cnt, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.common_state[:, min_y:max_y, min_x:max_x].sum(axis=0) == 0)
                 for channel_tmp in range(self.output_channel):
                     for j2 in range(idxs[channel_tmp].shape[0]):
                         if channel_tmp == channel and j2 == j:
                             continue
-                        cur_point2 = self.mnw_data.cells[idxs[channel_tmp][j2, 0], idxs[channel_tmp][j2, 1]].center
-                        next_point2 = self.mnw_data.cells[next_idxs[channel_tmp][j2, 0], next_idxs[channel_tmp][j2, 1]].center
-                        self.positions[j, j2, channel_tmp, :, :] = self.mnw_data.get_distance_from(cur_point2)[min_y:max_y, min_x:max_x]
-                        self.pis[j, j2, channel_tmp, :, :] = self.mnw_data.get_distance_from(next_point2)[min_y:max_y, min_x:max_x]
+                        cur_point2 = self.mnw_data.cells[idxs[channel_tmp][j2, 0]][idxs[channel_tmp][j2, 1]].center
+                        next_point2 = self.mnw_data.cells[next_idxs[channel_tmp][j2, 0]][next_idxs[channel_tmp][j2, 1]].center
+                        self.positions[cnt, j2, channel_tmp, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.mnw_data.distance_from(cur_point2)[min_y:max_y, min_x:max_x])
+                        self.pis[cnt, j2, channel_tmp, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.mnw_data.distance_from(next_point2)[min_y:max_y, min_x:max_x])
+                cnt += 1
+    def split_into(self, ratio):
+        # ratio: [train, test, validation]
+        mesh_traj_data = self.mesh_traj_data.split_into(ratio)
+        return [MeshDataset(mesh_traj_data[i], self.d, channel=self.channel) for i in range(len(ratio))]
 
 
 class PatchDataset(Dataset):

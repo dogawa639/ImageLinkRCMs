@@ -87,10 +87,10 @@ if __name__ == "__main__":
 
     if UNet:
         feature_num = 3
-        position_feature_num = 1
+        context_num = 1
         d = 16
-        gen = UNetGen(feature_num, position_feature_num).to(device)
-        input = torch.randn(bs, feature_num + position_feature_num, 2*d+1, 2*d+1).to(device)
+        gen = UNetGen(feature_num, context_num).to(device)
+        input = torch.randn(bs, feature_num + context_num, 2*d+1, 2*d+1).to(device)
 
         gen.train()
         out = gen(input)
@@ -105,5 +105,5 @@ if __name__ == "__main__":
         for param in gen.parameters():
             print(param.grad)
 
-        print(summary(model=gen.to("cpu"), input_size=(bs, feature_num + position_feature_num, 2 * d + 1, 2 * d + 1)))
+        print(summary(model=gen.to("cpu"), input_size=(bs, feature_num + context_num, 2 * d + 1, 2 * d + 1)))
 

@@ -6,7 +6,7 @@ from torch.nn.utils import spectral_norm
 __all__ = ["UNet"]
 
 class BaseConv(nn.Module):
-    def __init__(self, in_channels, out_channels, sn=False):
+    def __init__(self, in_channels, out_channels, sn=False, dropout=0.0):
         super().__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False)
@@ -16,11 +16,13 @@ class BaseConv(nn.Module):
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.act_fn = nn.ReLU(inplace=True)
+        self.dropout = nn.Dropout2d(dropout)
 
         self.sequence = nn.Sequential(
                 self.conv1,
                 self.bn1,
                 self.act_fn,
+                self.dropout,
                 self.conv2,
                 self.bn2,
                 self.act_fn
@@ -30,13 +32,13 @@ class BaseConv(nn.Module):
         return self.sequence(x)
 
 class UNetBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, sub=None, sn=False):
+    def __init__(self, in_channels, out_channels, sub=None, sn=False, dropout=0.0):
         super().__init__()
-        self.conv1 = BaseConv(in_channels, out_channels, sn)
+        self.conv1 = BaseConv(in_channels, out_channels, sn, dropout)
         self.pool = nn.MaxPool2d(2)
 
         self.upconv = nn.ConvTranspose2d(out_channels, out_channels // 2, 2, stride=2)
-        self.conv2 = BaseConv(out_channels // 2 + in_channels, in_channels, sn)
+        self.conv2 = BaseConv(out_channels // 2 + in_channels, in_channels, sn, dropout)
         self.sub = sub
 
         if sub is not None:
@@ -65,22 +67,21 @@ class UNetBlock(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, input_channels, output_channels, sn=False):
+    def __init__(self, input_channels, output_channels, depth=4, sn=False, dropout=0.0):
         super().__init__()
         self.input_channels = input_channels
         self.output_channels = output_channels
 
         self.conv0 = BaseConv(input_channels, 64, sn=sn)
-        self.block4 = UNetBlock(512, 1024, sn=sn)  # (1024, H/16, W/16)
-        self.block3 = UNetBlock(256, 512, sub=self.block4, sn=sn)  # (512, H/8, W/8)
-        self.block2 = UNetBlock(128, 256, sub=self.block3, sn=sn)  # (256, H/4, W/4)
-        self.block1 = UNetBlock(64, 128, sub=self.block2, sn=sn)  # bottleneck (128, H/2, W/2)
+        self.blocks = nn.ModuleList([UNetBlock(64 * 2 ** (depth - 1), 128 * 2 ** (depth - 1), sn=sn, dropout=dropout)])  # (128 * 2^(depth - 1), H/2^depth, W/2^depth)
+        for i in range(depth - 2, - 1, -1):
+            self.blocks.append(UNetBlock(64 * 2 ** i, 128 * 2 ** i, sub=self.blocks[-1], sn=sn, dropout=dropout))  # (128 * 2^i, H/2^(i+1), W/2^(i+1))
 
         self.out_conv = nn.Conv2d(64, output_channels, 1)
 
     def forward(self, x):
         x = self.conv0(x)
-        x = self.block1(x)
+        x = self.blocks[-1](x)
         x = self.out_conv(x)
         return x
 
