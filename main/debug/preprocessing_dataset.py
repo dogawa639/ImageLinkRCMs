@@ -2,6 +2,7 @@ if __name__ == "__main__":
     import configparser
     import os
     import json
+    from utility import *
     from preprocessing.dataset import *
     from utility_kalmanfilter import *
     import pandas as pd

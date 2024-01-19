@@ -27,6 +27,8 @@ class PP:
 
         self.path_dict = PP.get_path_dict(self.data, self.nw_data)  # {"tid": {"path": [link_id], "d_node": node_id, "id": ID(, "org": org)}}
         self.tids = list(self.path_dict.keys())
+        active_ids = [trip["id"] for trip in self.path_dict.values()]
+        self.data = self.data[self.data["ID"].isin(active_ids)]
 
     def __len__(self):
         return len(self.path_dict)
@@ -51,6 +53,7 @@ class PP:
         trip_nums = trip_nums.cumsum()
         trip_nums[-1] = len(self.path_dict)
         tids_shuffled = np.random.permutation(self.tids)
+        tids_shuffled = np.array([self.path_dict[tid]["id"] for tid in tids_shuffled])
         result = []
         for i in range(len(ratio)):
             if i == 0:
@@ -93,7 +96,7 @@ class PP:
         b_links = np.unique(target["b"].values)
         for b in b_links:
             tmp_target = target[target["b"] == b]
-            links = np.unique(tmp_target[["k", "a"]].values)
+            links = tmp_target["k"].values.tolist() + [b]
             idxs = [lid2idx[lid] for lid in links]
             path = {idxs[-1]: [idxs]}
             c = np.random.random()
@@ -125,7 +128,7 @@ class PP:
     @staticmethod
     def get_path_dict(data, nw_data):
         # real_data: {"tid": {"path": [link_id], "d_node": node_id, "id": ID(, "org": org)}}
-        # model is soreted by time
+        # data is soreted by time
         trip_ids = sorted(data["ID"].unique())
         use_org = "org" in data.columns
         real_data = dict()
@@ -136,30 +139,35 @@ class PP:
             target = data[data["ID"] == t]
             val = target[["k", "a"]].values
 
-            tmp_path = [(i, v[0]) for i, v in enumerate(val) if v[0] in nw_data.edges]
+            tmp_path = {i: v[0] for i, v in enumerate(val) if v[0] in nw_data.edges}
             tmp_path2 = {i: v[1] for i, v in enumerate(val) if v[1] in nw_data.edges}
             if len(tmp_path) == 0:
                 continue
             cnt += 1
             path = []
-            for idx, (i, tmp_edge) in enumerate(tmp_path):
-                if i - 1 in tmp_path2:  # if the previous link is in the network
+            for idx, (i, tmp_edge) in enumerate(tmp_path.items()):
+                if i - 1 in tmp_path:  # if the previous link is in the network
                     path.append(tmp_edge)
-                    if i not in tmp_path2:  # if the next link is not in the network
-                        last_link = path[-1]
-                        real_data[tid] = {"path": path, "d_node": nw_data.edges[last_link].end.id, "id": t}
-                        if use_org:
-                            real_data[tid]["org"] = target["org"].values[0]
-                        tid += 1
-                    elif idx == len(tmp_path) - 1:  # if the next link is in the network and this is the last link
-                        path.append(tmp_path2[i])
-                        last_link = path[-1]
-                        real_data[tid] = {"path": path, "d_node": nw_data.edges[last_link].end.id, "id": t}
-                        if use_org:
-                            real_data[tid]["org"] = target["org"].values[0]
-                        tid += 1
                 else:  # if the previous link is not in the network
                     path = [tmp_edge]
+
+                if i not in tmp_path2:  # if the next link is not in the network
+                    if len(path) < 2:  # not included in the result
+                        continue
+                    last_link = path[-1]
+                    real_data[tid] = {"path": path, "d_node": nw_data.edges[last_link].end.id, "id": t}
+                    if use_org:
+                        real_data[tid]["org"] = target["org"].values[0]
+                    tid += 1
+                elif idx == len(tmp_path) - 1:  # if the next link is in the network and this is the last link
+                    if len(path) < 2:  # not included in the result
+                        continue
+                    path.append(tmp_path2[i])
+                    last_link = path[-1]
+                    real_data[tid] = {"path": path, "d_node": nw_data.edges[last_link].end.id, "id": t}
+                    if use_org:
+                        real_data[tid]["org"] = target["org"].values[0]
+                    tid += 1
         print("path_samples: ", tid - 1)
         print("trip_num: ", cnt)
         return real_data

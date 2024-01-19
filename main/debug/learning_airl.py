@@ -2,6 +2,7 @@
 if __name__ == "__main__":
     import configparser
     import json
+    import os
     from learning.generator import *
     from learning.discriminator import *
     from learning.encoder import *

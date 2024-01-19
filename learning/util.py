@@ -3,7 +3,8 @@ from learning.generator import *
 from learning.encoder import *
 from learning.w_encoder import *
 
-def get_models(model_names, nw_data, output_channel, emb_dim, enc_dim, in_emb_dim, drop_out, sn, sln, h_dim, w_dim,
+def get_models(model_names, nw_data=None, output_channel=None, emb_dim=None, enc_dim=None, in_emb_dim=None,
+               drop_out=None, sn=None, sln=None, h_dim=None, w_dim=None,
                num_head=3, depth=6, gamma=0.9, max_num=40, ext_coeff=1.0, patch_size=None, num_source=0):
     # model_names: list of str
 
@@ -21,20 +22,24 @@ def get_models(model_names, nw_data, output_channel, emb_dim, enc_dim, in_emb_di
         if model_name == "FNW":
             models.append(FF(h_dim, w_dim, bias=True, sn=False))
         elif model_name == "CNNDis":
-            models.append(CNNDis(nw_data, output_channel, image_feature_num=enc_dim, max_num=max_num, sn=True, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))
+            models.append(CNNDis(nw_data, output_channel, image_feature_num=enc_dim, sn=True, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))
         elif model_name == "GNNDis":
             models.append(GNNDis(nw_data, emb_dim, output_channel, image_feature_num=enc_dim, gamma=gamma, in_emb_dim=in_emb_dim, num_head=num_head, dropout=drop_out, depth=depth, sn=True, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))
         elif model_name == "CNNGen":
             models.append(CNNGen(nw_data, output_channel, image_feature_num=enc_dim, max_num=max_num, sln=sln, w_dim=w_dim))
         elif model_name == "GNNGen":
             models.append(GNNGen(nw_data, emb_dim, output_channel, image_feature_num=enc_dim, enc_dim=emb_dim, in_emb_dim=in_emb_dim, num_head=num_head, dropout=drop_out, depth=depth, pre_norm=False, sn=sn, sln=sln, w_dim=w_dim))
-        elif model_name == "CNNEnc":
+        elif model_name == "CNNEnc":  # common for cnn and gnn link airl
             models.append(CNNEnc(patch_size, enc_dim, num_source=num_source, sln=sln, w_dim=w_dim))
         elif model_name == "CNNWEnc":
             models.append(CNNWEnc(nw_data.feature_num + nw_data.context_feature_num, w_dim))
         elif model_name == "GNNWEnc":
             adj_matrix = torch.tensor(nw_data.edge_graph).to(torch.float32)
             models.append(GNNWEnc(nw_data.feature_num, emb_dim, w_dim, adj_matrix))
+        elif model_name == "UNetDis":
+            models.append(UNetDis(nw_data.prop_dim, 1, output_channel, gamma=gamma, sn=sn, ext_coeff=ext_coeff))
+        elif model_name == "UNetGen":
+            models.append(UNetGen(nw_data.prop_dim, 1, sn=sn))
         else:
             raise Exception("Unknown model name: {}".format(model_name))
 

@@ -18,11 +18,12 @@ from utility import *
 from preprocessing.dataset import PatchDataset
 from models.general import log
 from logger import Logger
+__all__ = ["AIRL"]
 
 
 class AIRL:
     def __init__(self, generator, discriminator, use_index, datasets, model_dir, image_data=None, encoder=None, h_dim=10, emb_dim=10, f0=None,
-                 hinge_loss=False, hinge_thresh=0.5, patch_size=256, device="cpu"):
+                 hinge_loss=False, hinge_thresh=0.6, patch_size=256, device="cpu"):
         if hinge_thresh > 1.0 or hinge_thresh < 0.0:
             raise ValueError("hinge_thresh must be in [0, 1].")
         if encoder is not None and image_data is None:
@@ -58,7 +59,7 @@ class AIRL:
     
     def train_models(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
               train_ratio=0.8, max_train_num=10000, d_epoch=5, lr_f0=0.01, lr_e=0.0, image_file=None):
-        log = Logger(os.path.join(self.model_dir, "log.json"), conf_file)  #loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,criteria
+        log = Logger(os.path.join(self.model_dir, "log.json"), conf_file, figsize=(6.4, 4.8 * 3))  #loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,accuracy,ll,criteria
 
         optimizer_g = optim.Adam(self.generator.parameters(), lr=lr_g)
         optimizer_d = optim.Adam(self.discriminator.parameters(), lr=lr_d)
@@ -111,16 +112,17 @@ class AIRL:
                         logits = self.generator(batch_real[0], w=w)  # raw_data_fake requires_grad=True, (bs, oc, *choice_space)
                     else:
                         logits = self.generator(batch_real[0])  # raw_data_fake requires_grad=True, (bs, oc, *choice_space)
-                    logits = torch.where(batch_real[1].unsqueeze(1) > 0, logits, tensor(-9e15, dtype=torch.float32,
+                    mask = batch_real[1].unsqueeze(1)
+                    if self.use_index:
+                        mask = mask.view(-1, 1, logits.shape[-2], logits.shape[-1])
+                    logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32,
                                                               device=logits.device))
                     pi = self.get_pi_from_logits(logits)
-                    batch_fake = self.datasets[i].get_fake_batch(batch_real, logits.clone().detach()[:, i, :, :]) # batch_fake requires_grad=False
 
                     for j in range(d_epoch):
                         # loss function calculation
-                        log_d_real = self.get_log_d(batch_real, pi, i, w=w)  # discriminator inference performed inside
-                        log_d_fake = self.get_log_d(batch_fake, pi, i, w=w)  # discriminator inference performed inside
-                        loss_g, loss_d = self.loss(log_d_real, log_d_fake, self.hinge_loss)
+                        log_d_g, log_d_d = self.get_log_d(batch_real, pi, i, w=w)  # discriminator inference performed inside
+                        loss_g, loss_d = self.loss(log_d_g, log_d_d, self.hinge_loss)
 
                         # discriminator update
                         optimizer_d.zero_grad()
@@ -153,7 +155,7 @@ class AIRL:
                             pi = pi.detach()
                             w = w.detach()
 
-                        del log_d_fake, log_d_real, loss_d, loss_g
+                        del log_d_g, log_d_d, loss_d, loss_g
 
                 # validation
                 self.eval()
@@ -175,15 +177,15 @@ class AIRL:
                         logits = self.generator(batch_real[0], w=w)  # raw_data_fake requires_grad=True
                     else:
                         logits = self.generator(batch_real[0])  # raw_data_fake requires_grad=True
-                    logits = torch.where(batch_real[1].unsqueeze(1) > 0, logits, tensor(-9e15, dtype=torch.float32,
-                                                                                        device=logits.device))
+                    mask = batch_real[1].unsqueeze(1)
+                    if self.use_index:
+                        mask = mask.view(-1, 1, logits.shape[-2], logits.shape[-1])
+                    logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32,
+                                                                  device=logits.device))
                     pi = self.get_pi_from_logits(logits)
-                    batch_fake = self.datasets[i].get_fake_batch(batch_real,
-                                                                 logits[:, i, :, :])  # batch_fake requires_grad=False
-                    log_d_real = self.get_log_d(batch_real, pi, i, w=w)
-                    log_d_fake = self.get_log_d(batch_fake, pi, i, w=w)
-
-                    loss_g, loss_d = self.loss(log_d_real, log_d_fake, self.hinge_loss)
+                    log_d_g, log_d_d = self.get_log_d(batch_real, pi, i,
+                                                      w=w)  # discriminator inference performed inside
+                    loss_g, loss_d = self.loss(log_d_g, log_d_d, self.hinge_loss)
 
                     mode_loss_g_val.append(loss_g.clone().detach().cpu().item())
                     mode_loss_d_val.append(loss_d.clone().detach().cpu().item())
@@ -218,47 +220,24 @@ class AIRL:
             if criteria < min_criteria:
                 min_criteria = criteria
                 print(f"save model. minimum criteria: {min_criteria}")
-                self.generator.save(self.model_dir)
-                self.discriminator.save(self.model_dir)
+                self.save()
 
             t2 = time.perf_counter()
             print("epoch: {}, loss_g_val: {:.4f}, loss_d_val: {:.4f}, criteria: {:.4f}, time: {:.4f}".format(
                 e, epoch_loss_g_val[-1], epoch_loss_d_val[-1], criteria, t2 - t1))
 
         if image_file is not None:
-            fig = plt.figure()
-            ax1 = fig.add_subplot(311)
-            ax2 = fig.add_subplot(312)
-            ax3 = fig.add_subplot(313)
-
-            loss_g = np.array(log.data["loss_g"])
-            loss_d = np.array(log.data["loss_d"])
-            for i in range(loss_g.shape[1]):
-                ax1.plot(loss_g[:, i], label="mode {}".format(i))
-                ax2.plot(loss_d[:, i], label="mode {}".format(i))
-            ax3.plot(log.data["criteria"])
-
-            ax1.set_xlabel("epoch")
-            ax2.set_xlabel("epoch")
-            ax3.set_xlabel("epoch")
-            ax1.set_ylabel("loss_g")
-            ax2.set_ylabel("loss_d")
-            ax3.set_ylabel("criteria")
-            ax1.legend()
-            ax2.legend()
-
-            plt.savefig(image_file)
-            plt.close()
+            log.save_fig(image_file)
         log.close()
 
-    def loss(self, log_d_real, log_d_fake, hinge_loss=False):
-        # log_d_real, log_d_fake: (log d_for_g, log 1-d_for_g), (log d_for_d, log 1-d_for_d)
+    def loss(self, log_d_g, log_d_d, hinge_loss=False):
+        # log_d_g, log_d_d: (log d_for_g, log 1-d_for_g), (log d_for_d, log 1-d_for_d)
         if hinge_loss:
-            l_g = -log_d_fake[0][0] + log_d_fake[0][1]
-            l_d = torch.max(-log_d_real[1][0], self.hinge_thresh) + torch.max(-log_d_fake[1][1], self.hinge_thresh)
+            l_g = -log_d_g[0] + log_d_g[1]
+            l_d = torch.max(-log_d_d[0], self.hinge_thresh) + torch.max(-log_d_d[1], self.hinge_thresh)
         else:
-            l_g = -log_d_fake[0][0] + log_d_fake[0][1]
-            l_d = -log_d_real[1][0] - log_d_fake[1][1]
+            l_g = -log_d_g[0] + log_d_g[1]
+            l_d = -log_d_d[0] - log_d_d[1]
 
         return l_g.sum(), l_d.sum()
 
@@ -272,19 +251,21 @@ class AIRL:
         # Emb: (trip_num, link_num, link_num) sparse corresponds to transition_matrix
         # output: (log d_for_g, log 1-d_for_g), (log d_for_d, log 1-d_for_d)
         if self.use_index:
-            input, mask, _, _, _ = batch
+            input, mask, next_link, _, _ = batch
+            mask = mask.view(mask.shape[0], input.shape[-2], input.shape[-1])
+            next_link = next_link.view(next_link.shape[0], input.shape[-2], input.shape[-1])
         else:
-            input, mask, _, _ = batch
+            input, mask, next_link, _ = batch
         f_val = self.discriminator(input, pi, i=i, w=w)
         f_val_masked = f_val * mask
         f_val_clone_masked = f_val_masked.clone().detach()
         pi_i_clone = pi.clone().detach()[:, i, :, :]
         # f_val: (bs, oc, *choice_space), pi: (bs, oc, *choice_space)
-        log_d_g = f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi[:, i, :, :])
-        log_1_d_g = log(pi[:, i, :, :]) - log(torch.exp(f_val_clone_masked) + pi[:, i, :, :])
+        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi[:, i, :, :])) * pi_i_clone
+        log_1_d_g = (log(pi[:, i, :, :]) - log(torch.exp(f_val_clone_masked) + pi[:, i, :, :])) * pi_i_clone
 
-        log_d_d = f_val_masked - log(torch.exp(f_val_masked) + pi_i_clone)
-        log_1_d_d = log(pi_i_clone) - log(torch.exp(f_val_masked) + pi_i_clone)
+        log_d_d = (f_val_masked - log(torch.exp(f_val_masked) + pi_i_clone)) * next_link
+        log_1_d_d = (log(pi_i_clone) - log(torch.exp(f_val_masked) + pi_i_clone)) * pi_i_clone
 
         return (log_d_g, log_1_d_g), (log_d_d, log_1_d_d)
 
@@ -292,6 +273,8 @@ class AIRL:
         # ll, TP, FP, FN, TN
         if self.use_index:
             input, mask, next_mask, _, _ = batch
+            mask = mask.view(mask.shape[0], input.shape[-2], input.shape[-1])  # (*, 3, 3)
+            next_mask = next_mask.view(next_mask.shape[0], input.shape[-2], input.shape[-1])  # (*, 3, 3)
         else:
             input, mask, next_mask, _ = batch
         f_val, util, ext, val = self.discriminator.get_vals(input, pi, i=i, w=w)  # (bs, *choice_space)
@@ -300,8 +283,8 @@ class AIRL:
         # choose maximum q
         if self.use_index:  # choose from choice_space
             q = q.view(q.shape[0], -1)
-            mask = mask.view(mask.shape[0], -1)
-            next_mask = next_mask.view(next_mask.shape[0], -1)
+            mask = mask.view(mask.shape[0], -1)  # (*, 9)
+            next_mask = next_mask.view(next_mask.shape[0], -1)  # (*, 9)
         pi_q = F.softmax(q, dim=-1)
         ll = log((pi_q * next_mask).sum(dim=-1)).sum()
 
@@ -373,6 +356,14 @@ class AIRL:
             self.f0.eval()
         if self.use_encoder:
             self.encoder.eval()
+
+    def save(self):
+        self.generator.save(self.model_dir)
+        self.discriminator.save(self.model_dir)
+
+    def load(self):
+        self.generator.load(self.model_dir)
+        self.discriminator.load(self.model_dir)
 
     def _load_image_feature(self):
         comp_feature = None

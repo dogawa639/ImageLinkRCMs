@@ -4,9 +4,11 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from models.cnn import CNN3x3
 from models.gnn import GT
+from models.unet import UNet
 from models.general import FF, SLN
 
 import numpy as np
+__all__ = ["CNNGen", "GNNGen", "UNetGen"]
 
 
 # CNN
@@ -176,6 +178,39 @@ class GNNGen(nn.Module):
 
     def load(self, model_dir):
         self.load_state_dict(torch.load(model_dir + "/gnngen.pth"))
+
+
+class UNetGen(nn.Module):
+    # one generator for one transportation
+    # unet bottleneck: (*, 1024, H/16, W/16)
+    def __init__(self, feature_num, context_num,
+                 sn=True, dropout=0.0):
+        super().__init__()
+        # state : (bs, feature_num, 2d+1, 2d+1)
+        # context : (bs, context_num, 2d+1, 2d+1)
+        self.feature_num = feature_num
+        self.context_num = context_num
+        self.total_feature = feature_num + context_num
+
+        self.unet = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=3)
+
+    def forward(self, inputs):
+        # inputs: (bs, total_feature, 2d+1, 2d+1)
+        # output: (bs, 2d+1, 2d+1)
+        return self.unet(inputs).squeeze(1)
+
+    def save(self, model_dir, i=None):
+        if i is None:
+            torch.save(self.state_dict(), model_dir + "/unetgen.pth")
+        else:
+            torch.save(self.state_dict(), model_dir + "/unetgen_{}.pth".format(i))
+
+    def load(self, model_dir, i=None):
+        if i is None:
+            self.load_state_dict(torch.load(model_dir + "/unetgen.pth"))
+        else:
+            self.load_state_dict(torch.load(model_dir + "/unetgen_{}.pth".format(i)))
+
 
 
 
