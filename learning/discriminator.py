@@ -4,9 +4,11 @@ import torch.nn.functional as F
 from models.cnn import CNN3x3, CNN1x1
 from models.transformer import TransformerEncoder
 from models.gnn import GT, GAT
-from models.general import FF, SLN, Softplus, softplus
+from models.unet import UNet
+from models.general import FF, SLN, softplus
 
 import numpy as np
+__all__ = ["CNNDis", "GNNDis", "UNetDis"]
 
 
 # CNN
@@ -17,13 +19,12 @@ import numpy as np
 # output: (bs, link_num, link_num) or (trip_num, oc, link_num, link_num)
 class CNNDis(nn.Module):
     def __init__(self, nw_data, output_channel, 
-                 image_feature_num=0, gamma=0.9, max_num=40, sn=True, sln=True, w_dim=10, ext_coeff=1.0):
+                 image_feature_num=0, gamma=0.9, sn=True, sln=True, w_dim=10, ext_coeff=1.0):
         super().__init__()
         self.nw_data = nw_data
         self.output_channel = output_channel
         self.image_feature_num = image_feature_num
         self.gamma = gamma
-        self.max_num = max_num
         self.ext_coeff = ext_coeff
 
         self.feature_num = self.nw_data.feature_num
@@ -178,6 +179,63 @@ class GNNDis(nn.Module):
 
     def load(self, model_dir):
         self.load_state_dict(torch.load(model_dir + "/gnndis.pth"))
+
+
+class UNetDis(nn.Module):
+    # one discriminator for one transportation
+    def __init__(self, feature_num, context_num, output_channel,
+                 gamma=0.9, sn=True, ext_coeff=1.0):
+        super().__init__()
+        # state : (bs, feature_num, 2d+1, 2d+1)
+        # context : (bs, context_num, 2d+1, 2d+1)
+        self.feature_num = feature_num
+        self.context_num = context_num
+        self.output_channel = output_channel  # number of transportations
+        self.total_feature = feature_num + context_num
+        self.gamma = gamma
+        self.ext_coeff = ext_coeff
+
+        self.util = UNet(self.total_feature, 1, sn=sn)
+        self.ext = UNet(self.total_feature + output_channel * 2, 1, sn=sn)  # state + other agent's (position + pi)
+        self.val = UNet(self.total_feature, 1, sn=sn)
+
+    def forward(self, input, positions, pis):
+        # input: (bs, total_feature, 2d+1, 2d+1)
+        # positions: (bs, num_agents, output_channel, 2d+1, 2d+1)
+        # pis: (bs, num_agents, output_channel, 2d+1, 2d+1)
+        # f_val, util, val: (bs, 2d+1, 2d+1)
+        # ext: (bs, num_agents, 2d+1, 2d+1)
+        f_val, _, _, _ = self.get_vals(input, positions, pis)
+        return f_val
+
+    def get_vals(self, input, positions, pis):
+        # input: (bs, total_feature, 2d+1, 2d+1)
+        # positions: (bs, num_agents, output_channel, 2d+1, 2d+1)
+        # pis: (bs, num_agents, output_channel, 2d+1, 2d+1)
+        # f_val, util, val: (bs, 2d+1, 2d+1)
+        # ext: (bs, num_agents, 2d+1, 2d+1)
+        if input.shape[-1] % 2 != 1:
+            raise Exception("input.shape[-1] should be odd.")
+        d = int((input.shape[-1] - 1) / 2)
+        util = self.util(input).squeeze(1)
+        val = self.val(input).squeeze(1)
+        active_agent = tensor(positions.view(*positions.shape[:-3], -1).sum(dim=-1) > 0.0, dtype=torch.float32, device=positions.device)  # (bs, num_agents)
+        ext_input = torch.cat((input.unsqueeze(1).expand(-1, positions.shape[1], -1, -1, -1), positions, pis), dim=2)  # (bs, num_agents, total_feature+output_channel*2, 2d+1, 2d+1)
+        ext = self.ext(ext_input.view(-1, *ext_input.shape[2:])).view(ext_input.shape[0], ext_input.shape[1], ext_input.shape[3], ext_input.shape[4])  # (bs, num_agents, 2d+1, 2d+1)
+        ext = ext * active_agent.unsqueeze(-1).unsqueeze(-1)
+
+        f_val = util + self.ext_coeff * ext.sum(dim=1, keepdims=False) + self.gamma * val - val[:, d, d].view(-1, 1, 1)
+        return f_val, util, ext, val
+
+    def save(self, model_dir):
+        torch.save(self.state_dict(), model_dir + "/unetdis.pth")
+
+    def load(self, model_dir):
+        self.load_state_dict(torch.load(model_dir + "/unetdis.pth"))
+
+
+
+
 
 
 

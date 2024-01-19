@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from utility import *
 
 class Logger:
-    def __init__(self, json_file, conf_file):
+    def __init__(self, json_file, conf_file, figsize=(6.4, 4.8)):
         self.json_file = json_file
         self.conf_file = conf_file
 
@@ -18,7 +18,7 @@ class Logger:
                 "config": conf_file
         }
 
-        self.fig = plt.figure(tight_layout=True)
+        self.fig = plt.figure(tight_layout=True, figsize=figsize)
         self.closed = False
 
     def close(self):

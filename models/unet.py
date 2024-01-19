@@ -71,10 +71,10 @@ class UNet(nn.Module):
         self.output_channels = output_channels
 
         self.conv0 = BaseConv(input_channels, 64, sn=sn)
-        self.block4 = UNetBlock(512, 1024, sn=sn)
-        self.block3 = UNetBlock(256, 512, sub=self.block4, sn=sn)
-        self.block2 = UNetBlock(128, 256, sub=self.block3, sn=sn)
-        self.block1 = UNetBlock(64, 128, sub=self.block2, sn=sn)
+        self.block4 = UNetBlock(512, 1024, sn=sn)  # (1024, H/16, W/16)
+        self.block3 = UNetBlock(256, 512, sub=self.block4, sn=sn)  # (512, H/8, W/8)
+        self.block2 = UNetBlock(128, 256, sub=self.block3, sn=sn)  # (256, H/4, W/4)
+        self.block1 = UNetBlock(64, 128, sub=self.block2, sn=sn)  # bottleneck (128, H/2, W/2)
 
         self.out_conv = nn.Conv2d(64, output_channels, 1)
 

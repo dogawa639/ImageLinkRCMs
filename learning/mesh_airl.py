@@ -18,62 +18,42 @@ from utility import *
 from preprocessing.dataset import PatchDataset
 from models.general import log
 from logger import Logger
-__all__ = ["AIRL"]
+
+__all__ = ["MeshAIRL"]
 
 
-class AIRL:
-    def __init__(self, generator, discriminator, use_index, datasets, model_dir, image_data=None, encoder=None, h_dim=10, emb_dim=10, f0=None,
-                 hinge_loss=False, hinge_thresh=0.6, patch_size=256, device="cpu"):
+class MeshAIRL:
+    # maybe redundant to airl.py
+    def __init__(self, generator, discriminator, datasets, model_dir,
+                 hinge_loss=False, hinge_thresh=0.6, device="cpu"):
         if hinge_thresh > 1.0 or hinge_thresh < 0.0:
             raise ValueError("hinge_thresh must be in [0, 1].")
-        if encoder is not None and image_data is None:
-            raise ValueError("image_data must be set when encoder is not None.")
 
         self.generator = generator.to(device)
         self.discriminator = discriminator.to(device)
-        self.use_index = use_index  # whether inputs are the local link feature or not
         self.datasets = datasets  # list of Dataset  [train+test]
         self.model_dir = model_dir
-        self.use_encoder = image_data is not None and encoder is not None
-        self.encoder = encoder
-        self.h_dim = h_dim
-        self.emb_dim = emb_dim
-        self.f0 = f0  # h->w
-        self.use_w = f0 is not None
-        self.image_data = image_data
         self.hinge_loss = hinge_loss
         self.hinge_thresh = -log(tensor(hinge_thresh, dtype=torch.float32, device=device, requires_grad=False))
-        self.patch_size = patch_size
         self.device = device
-
-        self.sln = self.use_w
 
         self.link_num = len(self.datasets[0].nw_data.lids)
         self.output_channel = len(self.datasets)
 
-        if self.use_encoder:
-            self.encoder = self.encoder.to(device)
-            self._load_image_feature()  # self.comp_feature: (link_num, comp_dim)
-        if self.use_w:
-            self.f0 = self.f0.to(device)
-    
     def train_models(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
-              train_ratio=0.8, max_train_num=10000, d_epoch=5, lr_f0=0.01, lr_e=0.0, image_file=None):
-        log = Logger(os.path.join(self.model_dir, "log.json"), conf_file, figsize=(6.4, 4.8 * 3))  #loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,accuracy,ll,criteria
+                     train_ratio=0.8, max_train_num=10000, d_epoch=5, image_file=None):
+        log = Logger(os.path.join(self.model_dir, "log.json"), conf_file,
+                     figsize=(6.4, 4.8 * 3))  # loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,accuracy,ll,criteria
 
         optimizer_g = optim.Adam(self.generator.parameters(), lr=lr_g)
         optimizer_d = optim.Adam(self.discriminator.parameters(), lr=lr_d)
-        train_encoder = lr_e > 0.0 and self.use_encoder
-        if self.use_w:
-            optimizer_0 = optim.Adam(self.f0.parameters(), lr=lr_f0)
-        if train_encoder:
-            optimizer_e = optim.Adam(self.encoder.parameters(), lr=lr_e)
 
         dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle}
         dataloaders_real = [[DataLoader(tmp, **dataset_kwargs)
-                            for tmp in dataset.split_into((min(train_ratio, max_train_num / len(dataset) * batch_size), 1-train_ratio))]
+                             for tmp in dataset.split_into(
+                (min(train_ratio, max_train_num / len(dataset) * batch_size), 1 - train_ratio))]
                             for dataset in self.datasets]  # [train_dataloader, test_dataloader]
-        
+
         min_criteria = 1e10
         for e in range(epochs):
             t1 = time.perf_counter()
@@ -100,25 +80,14 @@ class AIRL:
                     # Grid: (sum(links), 3, 3) corresponds to next_links
                     # Emb: (trip_num, link_num, link_num) sparse, corresponds to transition_matrix
                     batch_real = [tensor(tmp.to_dense(), dtype=torch.float32, device=self.device) for tmp in batch_real]
-                    bs = batch_real[0].shape[0]
-                    w = None
-                    if self.use_w:
-                        w = self.f0(batch_real[-1])  # (bs, w_dim)
-                    if self.use_encoder:
-                        # append image_feature to the original feature
-                        batch_real = self.cat_image_feature(batch_real, w=w)
 
-                    if self.sln:
-                        logits = self.generator(batch_real[0], w=w)  # raw_data_fake requires_grad=True, (bs, oc, *choice_space)
-                    else:
-                        logits = self.generator(batch_real[0])  # raw_data_fake requires_grad=True, (bs, oc, *choice_space)
+                    logits = self.generator(batch_real[0])  # raw_data_fake requires_grad=True, (bs, oc, *choice_space)
                     mask = batch_real[1].unsqueeze(1)
-                    if self.use_index:
-                        mask = mask.view(-1, 1, logits.shape[-2], logits.shape[-1])
                     logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32,
-                                                              device=logits.device))
+                                                                  device=logits.device))
                     pi = self.get_pi_from_logits(logits)
-                    batch_fake = self.datasets[i].get_fake_batch(batch_real, logits.clone().detach()[:, i, :, :]) # batch_fake requires_grad=False
+                    batch_fake = self.datasets[i].get_fake_batch(batch_real, logits.clone().detach()[:, i, :,
+                                                                             :])  # batch_fake requires_grad=False
 
                     for j in range(d_epoch):
                         # loss function calculation
@@ -136,19 +105,10 @@ class AIRL:
 
                         if j == 0:
                             # f0 and encoder update
-                            if self.use_w:
-                                optimizer_0.zero_grad()
-                            if train_encoder:
-                                optimizer_e.zero_grad()
 
                             optimizer_g.zero_grad()
                             with detect_anomaly():
                                 loss_g.backward(retain_graph=True)
-
-                            if self.use_w:
-                                optimizer_0.step()
-                            if train_encoder:
-                                optimizer_e.step()
 
                             # generator update
                             optimizer_g.step()
@@ -168,20 +128,9 @@ class AIRL:
                 fn = 0.0
                 for batch_real in dataloader_val:
                     batch_real = [tensor(tmp.to_dense(), dtype=torch.float32, device=self.device) for tmp in batch_real]
-                    w = None
-                    if self.use_w:
-                        w = self.f0(batch_real[-1])  # (bs, w_dim)
-                    if self.use_encoder:
-                        # append image_feature to the original feature
-                        batch_real = self.cat_image_feature(batch_real, w=w)
 
-                    if self.sln:
-                        logits = self.generator(batch_real[0], w=w)  # raw_data_fake requires_grad=True
-                    else:
-                        logits = self.generator(batch_real[0])  # raw_data_fake requires_grad=True
+                    logits = self.generator(batch_real[0])  # raw_data_fake requires_grad=True
                     mask = batch_real[1].unsqueeze(1)
-                    if self.use_index:
-                        mask = mask.view(-1, 1, logits.shape[-2], logits.shape[-1])
                     logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32,
                                                                   device=logits.device))
                     pi = self.get_pi_from_logits(logits)
@@ -231,7 +180,6 @@ class AIRL:
             t2 = time.perf_counter()
             print("epoch: {}, loss_g_val: {:.4f}, loss_d_val: {:.4f}, criteria: {:.4f}, time: {:.4f}".format(
                 e, epoch_loss_g_val[-1], epoch_loss_d_val[-1], criteria, t2 - t1))
-
         if image_file is not None:
             log.save_fig(image_file)
         log.close()
@@ -256,11 +204,7 @@ class AIRL:
         # Grid: (sum(links), 3, 3) corresponds to next_links
         # Emb: (trip_num, link_num, link_num) sparse corresponds to transition_matrix
         # output: (log d_for_g, log 1-d_for_g), (log d_for_d, log 1-d_for_d)
-        if self.use_index:
-            input, mask, _, _, _ = batch
-            mask = mask.view(mask.shape[0], input.shape[-2], input.shape[-1])
-        else:
-            input, mask, _, _ = batch
+        input, mask, _, _ = batch
         f_val = self.discriminator(input, pi, i=i, w=w)
         f_val_masked = f_val * mask
         f_val_clone_masked = f_val_masked.clone().detach()
@@ -276,59 +220,26 @@ class AIRL:
 
     def get_creteria(self, batch, pi, i, w=None):
         # ll, TP, FP, FN, TN
-        if self.use_index:
-            input, mask, next_mask, _, _ = batch
-            mask = mask.view(mask.shape[0], input.shape[-2], input.shape[-1])  # (*, 3, 3)
-            next_mask = next_mask.view(next_mask.shape[0], input.shape[-2], input.shape[-1])  # (*, 3, 3)
-        else:
-            input, mask, next_mask, _ = batch
+        input, mask, next_mask, _ = batch
         f_val, util, ext, val = self.discriminator.get_vals(input, pi, i=i, w=w)  # (bs, *choice_space)
         q = util + ext + self.discriminator.gamma * val
         q = torch.where(mask > 0, q, tensor(-9e15, dtype=torch.float32, device=q.device))
         # choose maximum q
-        if self.use_index:  # choose from choice_space
-            q = q.view(q.shape[0], -1)
-            mask = mask.view(mask.shape[0], -1)  # (*, 9)
-            next_mask = next_mask.view(next_mask.shape[0], -1)  # (*, 9)
         pi_q = F.softmax(q, dim=-1)
         ll = log((pi_q * next_mask).sum(dim=-1)).sum()
 
         pred_mask = (q == q.max(dim=1, keepdim=True)[0]).to(torch.float32)
         tp = (next_mask * pred_mask).sum()
-        fp = (mask * (1-next_mask) * pred_mask).sum()
-        tn = (mask * (1-next_mask) * (1-pred_mask)).sum()
-        fn = (next_mask * (1-pred_mask)).sum()
+        fp = (mask * (1 - next_mask) * pred_mask).sum()
+        tn = (mask * (1 - next_mask) * (1 - pred_mask)).sum()
+        fn = (next_mask * (1 - pred_mask)).sum()
         return ll, tp, fp, tn, fn
-
-    
-    def cat_image_feature(self, batch, w=None):
-        # w: (bs, w_dim)
-        # index: (bs, 9)
-        image_feature = self.encoder(self.comp_feature, w=w)  # (bs, link_num, emb_dim)
-
-        # inputs: (bs, c, 3, 3) or (bs, link_num, feature_num). c or feature_num are total_feature_num + emb_dim
-        if self.use_index:
-            # image_feature: tensor(link_num, emb_dim)
-            # batch[3]: tensor(bs, 9)
-            image_feature_tmp = image_feature[batch[3], :].transpose(1, 2).view(batch[3].shape[0], -1, 3, 3)
-            inputs = torch.cat((batch[0], image_feature_tmp), dim=1)
-        else:
-            print(image_feature.shape, batch[0].shape)
-            inputs = torch.cat((batch[0], image_feature), dim=2)
-
-        batch = [inputs, *batch[1:]]
-        return batch
 
     def generate(self, bs, w=None):
         # only for gnn
-        if not self.use_encoder or self.use_index:
-            raise Exception("This method is only for GNNEmb.")
         self.eval()
 
         inputs = [tensor(self.real_data.feature_matrix, dtype=torch.float32, device=self.device).repeat(bs, 1, 1)]
-        if self.use_encoder:
-            # append image_feature to the original feature
-            inputs = self.cat_image_feature(inputs, w=w)
         inputs = inputs[0]  # (bs, link_num, feature_num)
         adj_matrix = self.generator(inputs, None, w=w)  # (bs, oc, link_num, link_num)
         datasets = [self.datasets[i].get_dataset_from_adj(adj_matrix[:, i, :, :]) for i in range(self.output_channel)]
@@ -339,46 +250,15 @@ class AIRL:
         # pi: (bs, oc, *choice_space)
         # self.use_index: logits are local -> choice from choice_space
         # not self.use_index: logits are global -> choice from dim=-1
-        if self.use_index:
-            shape = logits.shape
-            pi = F.softmax(logits.view(shape[0], shape[1], -1), dim=2).view(shape)
-        else:
-            pi = F.softmax(logits, dim=-1)
+        pi = F.softmax(logits, dim=-1)
         return pi
 
     def train(self):
         self.generator.train()
         self.discriminator.train()
-        if self.use_w:
-            self.f0.train()
-        if self.use_encoder:
-            self.encoder.train()
 
     def eval(self):
         self.generator.eval()
         self.discriminator.eval()
-        if self.use_w:
-            self.f0.eval()
-        if self.use_encoder:
-            self.encoder.eval()
-
-    def _load_image_feature(self):
-        comp_feature = None
-        comp_dim = None
-        for i in range(len(self.image_data)):
-            tmp_feature = self.image_data.load_compressed(i)
-            if tmp_feature is not None:
-                tmp_feature = np.expand_dims(tmp_feature, 0)
-                comp_dim = tmp_feature.shape[-1]
-                if comp_feature is None:
-                    comp_feature = np.zeros((i, comp_dim), dtype=np.float32)
-            elif comp_dim is not None:
-                tmp_feature = np.zeros((1, comp_dim), dtype=np.float32)
-            if tmp_feature is not None:
-                comp_feature = np.concatenate((comp_feature, tmp_feature), axis=0)
-        if comp_feature is None:
-            print("No image feature is loaded.")
-        else:
-            self.comp_feature = tensor(comp_feature, dtype=torch.float32, device=self.device)
 
 

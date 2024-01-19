@@ -703,7 +703,7 @@ class NetworkCNN(NetworkBase):
         super().set_link_prop(**kwargs)
 
         features = None
-        for i in range(30):
+        for i in range(30):  # d_node random sampling adhoc
             d_node_id = self.nids[np.random.randint(len(self.nids))]
             tmp_features = self.get_all_feature_matrix(d_node_id)
             tmp_features = tmp_features.astype(np.float32)
