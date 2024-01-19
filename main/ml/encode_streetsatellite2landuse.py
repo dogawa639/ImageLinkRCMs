@@ -10,6 +10,7 @@ if __name__ == "__main__":
     import time
     import os
     import json
+    import gc
     import configparser
     from preprocessing.dataset import *
     from models.deeplabv3 import deeplabv3_resnet50, classifier_resnet50, ResNet50_Weights
@@ -139,6 +140,8 @@ if __name__ == "__main__":
             val_loss_total = tmp_loss_total / val_data_num
             logger.add_log("val_loss", val_loss)
             logger.add_log("val_loss_total", val_loss_total)
+
+            gc.collect()
 
             if EARLY_STOP:
                 if val_loss < min_loss:

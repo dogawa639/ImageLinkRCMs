@@ -88,7 +88,7 @@ class YoLoV5Detect:
         if out_mov_path is not None:
             out.release()
         arrays = [np.array([[i]+objs[k][i][j].tolist() for i in range(len(objs[k])) for j in range(len(objs[k][i])) if objs[k][i][j][4] > threshold]) for k in range(len(objs))]
-        objs = [pd.DataFrame(array, columns=["frame_num", "x1", "y1", "x2", "y2", "conf"]) for array in arrays]
+        objs = [pd.DataFrame(array, columns=["frame_num", "x1", "y1", "x2", "y2", "conf"]) if len(array) > 0 else pd.DataFrame(columns=["frame_num", "x1", "y1", "x2", "y2", "conf"]) for array in arrays]
         for i in range(len(objs)):
             # foot position calculation
             objs[i]["foot_x"] = objs[i][["x1", "x2"]].mean(axis=1)
@@ -109,7 +109,12 @@ class YoLoV5Detect:
         if self.img_points is None or self.xy_points is None:
             raise ValueError("img_points and xy_points must be set.")
         if type(obj_df) is str:
-            obj_df = pd.read_csv(obj_df)
+            obj_df = read_csv(obj_df)
+        if len(obj_df) == 0:
+            obj_df = pd.DataFrame(columns=["frame_num", "x1", "y1", "x2", "y2", "conf", "foot_x", "foot_y", "2d_x", "2d_y", "2d_img_x", "2d_img_y", "time"])
+            if df_path is not None:
+                obj_df.to_csv(df_path, index=False)
+            return 0.0, 0.0
         frame_num = int(obj_df["frame_num"].max()) + 1
         m = cv2.getPerspectiveTransform(self.img_points, self.xy_points)
 
@@ -156,7 +161,7 @@ class YoLoV5Detect:
 
     def write_detection_result_movie(self, movie_path, obj_dfs, out_mov_path, colors=None):
         if type(obj_dfs[0]) is str:
-            obj_dfs = [pd.read_csv(obj_df) for obj_df in obj_dfs]
+            obj_dfs = [read_csv(obj_df) for obj_df in obj_dfs]
         for obj_df in obj_dfs:
             if "2d_img_x" not in obj_df.columns or "2d_img_y" not in obj_df.columns:
                 raise ValueError("calculate mapping2xy in advance")
@@ -189,7 +194,7 @@ class YoLoV5Detect:
                 f_num = int(val[i, 0])
                 bb = val[i, 1:5].tolist()
                 xy_img_x = (val[i, 5] - x_min) * 20
-                xy_img_y = (val[i, 6] - y_min) * 20
+                xy_img_y = (y_max - val[i, 6]) * 20
                 bbs[j][f_num].append(bb)
                 pts[j][f_num].append((xy_img_x, xy_img_y))
 
@@ -222,6 +227,95 @@ class YoLoV5Detect:
         cap.release()
         out.release()
 
+    def write_trajectory(self, obj_dfs, out_png_path=None, colors=None, clean=False):
+        # obj_dfs: [obj_df]
+        # obj_df : [frame_num,x1,y1,x2,y2,foot_x,foot_y,p_foot_x,p_foot_y,id,2d_x,2d_y,2d_img_x,2d_img_y,time]
+        if type(obj_dfs[0]) is str:
+            obj_dfs = [read_csv(obj_df) for obj_df in obj_dfs]
+        for obj_df in obj_dfs:
+            if "2d_x" not in obj_df.columns or "2d_y" not in obj_df.columns:
+                raise ValueError("calculate mapping2xy in advance")
+        if clean:
+            obj_dfs = [self.clean_trajectory(obj_df) for obj_df in obj_dfs]
+        cmap = plt.get_cmap("hsv")
+        colors = [tuple((np.array(cmap(i / len(obj_dfs))[2::-1])).astype(float)) for i in
+                  range(len(obj_dfs))] if colors is None else colors  # [(r, g, b)]
+        x_min, y_min, x_max, y_max = np.infty, np.infty, -np.infty, -np.infty
+        for obj_df in obj_dfs:
+            x_min = min(x_min, obj_df["2d_x"].min())
+            y_min = min(y_min, obj_df["2d_y"].min())
+            x_max = max(x_max, obj_df["2d_x"].max())
+            y_max = max(y_max, obj_df["2d_y"].max())
+        dx = x_max - x_min
+        dy = y_max - y_min
+        figsize = (dx / 3.0, dy / 3.0)
+        fig = plt.figure(figsize=figsize, dpi=200, layout="tight")
+        plt.figaspect(1.0)
+        for i, obj_df in enumerate(obj_dfs):
+            ids = sorted(obj_df["id"].unique())
+            for tmp_id in ids:
+                target = obj_df.loc[obj_df["id"] == tmp_id, ["frame_num", "2d_x", "2d_y"]].sort_values(by="frame_num")
+                plt.plot(target["2d_x"], target["2d_y"], color=colors[i], marker="o", markersize=1.5)
+        if out_png_path is not None:
+            plt.savefig(out_png_path)
+        plt.show()
+
+    def write_traj_statistics(self, obj_df, out_csv_path=None, out_png_path=None):
+        # obj_df : [frame_num,x1,y1,x2,y2,foot_x,foot_y,p_foot_x,p_foot_y,id,2d_x,2d_y,2d_img_x,2d_img_y,time]
+        # output : [frame_num,id,2d_x,2d_y,v,a,time]
+        # png: duration, length, speed
+        if type(obj_df) is str:
+            obj_df = read_csv(obj_df)
+        if len(obj_df) == 0:
+            obj_df = pd.DataFrame(
+                columns=["frame_num", "x1", "y1", "x2", "y2", "conf", "foot_x", "foot_y", "2d_x", "2d_y", "2d_img_x",
+                         "2d_img_y", "time"])
+            if out_csv_path is not None:
+                obj_df.to_csv(out_csv_path, index=False)
+            return obj_df
+        obj_df["time"] = pd.to_datetime(obj_df["time"])
+        ids = obj_df["id"].unique()
+        duration = []
+        length = []
+        speed = []
+        result = []
+        for tmp_id in ids:
+            target = obj_df.loc[obj_df["id"] == tmp_id, ["frame_num", "id", "2d_x", "2d_y", "time"]].sort_values(by="frame_num")
+            vs = (np.sqrt(np.square(target["2d_x"].diff()) + np.square(target["2d_y"].diff())) / (target["time"].diff().dt.total_seconds())).values
+            vs[0] = vs[1] if len(vs) > 1 else 0.0
+            if len(vs) > 1:
+                vs[1:] = vs[1:] / 2.0 + vs[:-1] / 2.0
+            target["v"] = vs
+            a = (target["v"].diff() / (target["time"].diff().dt.total_seconds())).values
+            if len(a) > 2:
+                a[1] = a[2]
+            a[0] = a[1] if len(a) > 1 else 0.0
+            target["a"] = a
+            result.extend(target[["frame_num", "id", "2d_x", "2d_y", "v", "a", "time"]].values.tolist())
+
+            duration.append((target["time"].iloc[-1] - target["time"].iloc[0]).total_seconds())
+            length.append(np.sqrt(np.square(target["2d_x"].iloc[-1] - target["2d_x"].iloc[0]) + np.square(target["2d_y"].iloc[-1] - target["2d_y"].iloc[0])))
+            speed.append(target["v"].mean())
+        result = pd.DataFrame(result, columns=["frame_num", "id", "2d_x", "2d_y", "v", "a", "time"])
+        if out_csv_path is not None:
+            result.to_csv(out_csv_path, index=False)
+        fig = plt.figure(figsize=(6.4, 14.4))
+        ax = fig.add_subplot(3, 1, 1)
+        ax.hist(duration, bins=100)
+        ax.set_xlabel("duration [sec]")
+        ax.set_ylabel("count")
+        ax = fig.add_subplot(3, 1, 2)
+        ax.hist(length, bins=100)
+        ax.set_xlabel("length [m]")
+        ax.set_ylabel("count")
+        ax = fig.add_subplot(3, 1, 3)
+        ax.hist(speed, bins=100)
+        ax.set_xlabel("speed [m/s]")
+        ax.set_ylabel("count")
+        if out_png_path is not None:
+            fig.savefig(out_png_path)
+        plt.show()
+
     @staticmethod
     def get_clip(mov_path, png_path, frame_num):
         cap = cv2.VideoCapture(mov_path)
@@ -230,6 +324,34 @@ class YoLoV5Detect:
         if ret == True:
             cv2.imwrite(png_path, frame)
         cap.release()
+
+    @staticmethod
+    def clean_trajectory(obj_df, out_csv_path=None, min_time=1, min_length=3.0):
+        # min_time: sec, min_length: m
+        # obj_df : [frame_num,x1,y1,x2,y2,foot_x,foot_y,p_foot_x,p_foot_y,id,2d_x,2d_y,2d_img_x,2d_img_y,time]
+        if type(obj_df) is str:
+            obj_df = read_csv(obj_df)
+        if len(obj_df) == 0:
+            obj_df = pd.DataFrame(columns=["frame_num", "x1", "y1", "x2", "y2", "foot_x", "foot_y", "p_foot_x", "p_foot_y", "id", "2d_x", "2d_y", "2d_img_x", "2d_img_y", "time"])
+            if out_csv_path is not None:
+                obj_df.to_csv(out_csv_path, index=False)
+            return obj_df
+        obj_df["time"] = pd.to_datetime(obj_df["time"])
+        ids = obj_df["id"].unique()
+        rm_ids = []
+        for tmp_id in ids:
+            target = obj_df.loc[obj_df["id"] == tmp_id, :].sort_values(by="frame_num")
+            if target["time"].iloc[-1] - target["time"].iloc[0] < datetime.timedelta(seconds=min_time):
+                rm_ids.append(tmp_id)
+                continue
+            if (target["2d_x"].iloc[-1] - target["2d_x"].iloc[0]) ** 2 + (target["2d_y"].iloc[-1] - target["2d_y"].iloc[0]) ** 2 < min_length ** 2:
+                rm_ids.append(tmp_id)
+                continue
+        obj_df = obj_df[~obj_df["id"].isin(rm_ids)]
+        print(f"cleaned {len(rm_ids)} trajectories out of {len(ids)}.")
+        if out_csv_path is not None:
+            obj_df.to_csv(out_csv_path, index=False)
+        return obj_df
 
 
 class ByteTrack:
@@ -267,9 +389,15 @@ class ByteTrack:
 
     def track(self, obj_df, out_path=None):
         # obj_df : ["frame_num", "x1", "y1", "x2", "y2", "conf", "foot_x", "foot_y"]
-        obj_df = obj_df if type(obj_df) is pd.DataFrame else pd.read_csv(obj_df)
+        obj_df = obj_df if type(obj_df) is pd.DataFrame else read_csv(obj_df)
         aspect = (obj_df["x2"] - obj_df["x1"]) / (obj_df["y2"] - obj_df["y1"])
         obj_df = obj_df[(aspect < 1.0) & (aspect > 0.1)]
+        if len(obj_df) == 0:
+            traj_total = pd.DataFrame(columns=["frame_num", "x1", "y1", "x2", "y2", "foot_x", "foot_y", "p_foot_x",
+                                               "p_foot_y", "id"])
+            if out_path is not None:
+                traj_total.to_csv(out_path, index=False)
+            return traj_total
 
         frame_num = int(obj_df["frame_num"].max()) + 1
         unused_count = []
