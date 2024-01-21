@@ -310,6 +310,12 @@ class NetworkBase:
             cnt += 1
         return props / (len(path) + (len(path) == 0))
 
+    def get_traffic(self, pi, emerge_traffic):
+        # pi: [link transition probability] (link_num, link_num)
+        # emerge_traffic: [traffic from link]
+        # return: np.array([traffic of link])
+        return  np.linalg.pinv(np.eye(len(self.lids)) - pi) @ np.array(emerge_traffic)
+
     def get_sc_params_node(self):
         return self.sc_node.mean_, self.sc_node.scale_
 
@@ -730,6 +736,7 @@ class NetworkGNN(NetworkBase):
         # k eig vectors to be used for pos encoding
         super().__init__(*args, **kwargs)
         self.k = k
+        self.context_feature_num = 2
         self._set_laplacian_matrix()
 
     def get_feature_matrix(self, normalize=False):
@@ -743,6 +750,22 @@ class NetworkGNN(NetworkBase):
         if normalize:
             feature_mat = self.sc_link.transform(feature_mat)
         return feature_mat
+
+    def get_context_matrix(self, d_node_id):
+        # context feature of all edges (link_num, context_feature_num)
+        context_mat = np.zeros((len(self.edges), self.context_feature_num), dtype=np.float32)
+        for i, edge in enumerate(self.edges.values()):
+            path, shortest_distance = self.get_shortest_path(edge.end.id, d_node_id)
+            if shortest_distance is None:
+                shortest_distance = 2000
+            d_angle = 0
+            if edge.end.id != d_node_id:
+                d_angle = self.get_angle(edge.end, self.nodes[d_node_id])
+                d_angle = np.abs((d_angle - edge.angle) % 360 - 180)
+            context_mat[i, 0] = shortest_distance / 1000.0
+            context_mat[i, 1] = d_angle
+
+        return context_mat
 
     def set_link_prop(self, **kwargs):
         super().set_link_prop(**kwargs)

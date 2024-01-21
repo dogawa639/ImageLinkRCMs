@@ -97,6 +97,26 @@ class GridDataset(Dataset):
         pp_data = self.pp_data.split_into(ratio)
         return [GridDataset(pp_data[i], self.h_dim) for i in range(len(ratio))]
 
+    def get_all_input(self, d_node_id, normalize=True):
+        # inputs : [link_num, f+c, 3, 3]
+        # masks : [link_num, 9]
+        # link_idxs : [link_num, 9]
+        f = self.nw_data.feature_num
+        c = self.nw_data.context_feature_num
+        inputs = np.zeros((0, self.nw_data.feature_num + self.nw_data.context_feature_num, 3, 3), dtype=np.float32)
+        masks = np.zeros((0, 9), dtype=np.float32)
+        link_idxs = np.zeros((0, 9), dtype=np.int32)
+        for i, lid in enumerate(self.nw_data.lids):
+            feature_mat, _ = self.nw_data.get_feature_matrix(lid, normalize=normalize)
+            context_mat, action_edge = self.nw_data.get_context_matrix(lid, d_node_id, normalize=normalize)
+
+            inputs[i, 0:f, :, :] = feature_mat
+            inputs[i, f:f + c, :, :] = context_mat
+            masks[i, :] = [len(edges) > 0 and j != 4 for j, edges in enumerate(action_edge)]
+            link_idxs[i, :] = [self.nw_data.lid2idx[np.random.choice(edges)] if len(edges) > 0 else -1 for edges in action_edge]
+        return tensor(inputs, requires_grad=False), tensor(masks, requires_grad=False), tensor(link_idxs, requires_grad=False)
+
+
     def get_fake_batch(self, real_batch, g_output):
         mask = real_batch[1].view(-1, 3, 3)
         logits = torch.where(mask > 0, g_output, tensor(-9e15, dtype=torch.float32, device=g_output.device))
@@ -116,9 +136,11 @@ class PPEmbedDataset(Dataset):
         self.nw_data = pp_data.nw_data
         self.feature_mat = self.nw_data.get_feature_matrix()
         self.link_num, self.feature_num = self.feature_mat.shape
+        self.context_num = self.nw_data.context_feature_num
 
-        self.pp_pos_embeddings = [self.get_pp_pos_embedding(path) for path in pp_data.load_edge_list()]
-        self.pp_adj_matrices = [self.get_pp_adj_matrix(path) for path in pp_data.load_edge_list()]
+        self.d_node_ids = [val["d_node"] for val in pp_data.path_dict.values()]
+        self.pp_pos_embeddings = [self.get_pp_pos_embedding(val["path"]) for val in pp_data.path_dict.values()]
+        self.pp_adj_matrices = [self.get_pp_adj_matrix(val["path"]) for val in pp_data.path_dict.values()]
 
         self.hs = torch.randn((len(self.pp_data), h_dim), dtype=torch.float32, requires_grad=False)
 
@@ -127,8 +149,8 @@ class PPEmbedDataset(Dataset):
     
     def __getitem__(self, idx):
         kwargs = {"dtype": torch.float32, "requires_grad": False}
-        # [link_num, feature_num], [link_num, link_num]
-        return (tensor(self.feature_mat, **kwargs),  # inputs
+        # [link_num, feature_num+context_num], [link_num, link_num]
+        return (tensor(np.concatenate((self.feature_mat, self.nw_data.get_context_matrix(self.d_node_ids[idx])), axis=1), **kwargs),  # inputs
                 tensor(self.nw_data.a_matrix.toarray(), **kwargs).to_sparse(),  # 隣接行列
                 tensor(self.pp_adj_matrices[idx].toarray(), **kwargs).to_sparse(),  # next_link_adj_matrix
                 tensor(self.hs[idx], **kwargs))  # h
@@ -159,9 +181,18 @@ class PPEmbedDataset(Dataset):
                 col.append(lid2idx[path[i+1].id])
         adj_matrix = coo_matrix((np.ones(len(row)), (row, col)), shape=(self.link_num, self.link_num), dtype=np.float32).tocsr()
         return adj_matrix
+
+    def get_all_input(self, d_node_id):
+        # inputs : [link_num, feature_num+context_num]
+        # a_matrix : [link_num, link_num]
+        kwargs = {"dtype": torch.float32, "requires_grad": False}
+        inputs = tensor(np.concatenate((self.feature_mat, self.nw_data.get_context_matrix(d_node_id)), axis=1), **kwargs)
+        a_matrix = tensor(self.nw_data.a_matrix.toarray(), **kwargs)
+        return inputs, a_matrix
     
-    def get_dataset_from_logits(self, logits):
+    def get_dataset_from_logits(self, logits, d_node_ids):
         # logits: [trip_num, link_num, link_num] tensor(cpu, detached) each element is real
+        # d_node_ids: [trip_num] list
         # return: PPEmbedDataset
         exp_logits = torch.exp(logits)
         origin = (exp_logits.sum(dim=1, keepdim=False) > 0) & (exp_logits.sum(dim=2, keepdim=False) == 0)  # どこからも入ってきていないが，出ていっているリンク (trip_num, link_num)
@@ -185,7 +216,7 @@ class PPEmbedDataset(Dataset):
         for _ in range(logits.shape[1]):
             for i in range(trip_num):
                 prev_idx = prev_idxs[i]
-                if exp_logits[i, prev_idx, :].sum() == 0:  # 次に移動するリンクがない場合
+                if exp_logits[i, prev_idx, :].sum() == 0 or self.nw_data.edges[self.nw_data.lids[prev_idx]] == d_node_ids[i]:  # 次に移動するリンクがない場合かd_nodeに到達した場合
                     continue
                 
                 next_idx = torch.multinomial(exp_logits[i, prev_idx, :], num_samples=1)  # (1,)
@@ -217,7 +248,7 @@ class PPEmbedDataset(Dataset):
 
 
 class MeshDataset(Dataset):
-    def __init__(self, mesh_traj_data, d, channel=None):
+    def __init__(self, mesh_traj_data, d, channel=None, return_id=False):
         # d: the number of grids to be considered in route choice
         # state: (bs, prop_dim, 2d+1, 2d+1)
         # context: (bs, context_num, 2d+1, 2d+1)
@@ -235,6 +266,7 @@ class MeshDataset(Dataset):
         self.times = mesh_traj_data.times
 
         self.channel = channel
+        self.return_id = return_id
 
         self.common_state = mesh_traj_data.get_state(0)[self.output_channel:, :, :]  # common for all time
         self.common_mask = self.common_state.sum(axis=0) > 0
@@ -263,7 +295,10 @@ class MeshDataset(Dataset):
         # pis: (max_agent_num, output_channel, 2d+1, 2d+1)
         if self.channel is None:
             raise Exception("Please set channel first.")
-        return (self.state[idx], self.context[idx], self.next_state[idx], self.mask[idx], self.positions[idx], self.pis[idx])
+        if self.return_id:
+            return self.state[idx], self.context[idx], self.next_state[idx], self.mask[idx], self.positions[idx], self.pis[idx], self.aids[idx]
+        else:
+            return self.state[idx], self.context[idx], self.next_state[idx], self.mask[idx], self.positions[idx], self.pis[idx]
 
     def set_channel(self, channel):
         self.channel = channel
@@ -274,11 +309,12 @@ class MeshDataset(Dataset):
         self.mask = torch.zeros((self.trip_nums[channel], 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
         self.positions = torch.zeros((self.trip_nums[channel], self.max_agent_num, self.output_channel, 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
         self.pis = torch.zeros((self.trip_nums[channel], self.max_agent_num, self.output_channel, 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
+        self.aids = torch.zeros((self.trip_nums[channel]), dtype=torch.int32)
 
         cnt = 0
         for i in range(len(self.mesh_traj_data.times)):
             prop = self.mesh_traj_data.get_state(i)[:self.output_channel]  # (prop_dim, H, W)
-            idxs, next_idxs, d_idxs = self.mesh_traj_data.get_action(i)  # (output_channel, num_agents, 2)
+            idxs, next_idxs, d_idxs, aids = self.mesh_traj_data.get_action(i)  # (num_channel, num_agents, 2), (num_channel, num_agents, 2), (num_channel, num_agents, 2), (num_channel, num_agents)
 
             for j in range(idxs[channel].shape[0]):
                 min_y = max(0, idxs[channel][j, 0] - self.d)
@@ -302,6 +338,7 @@ class MeshDataset(Dataset):
                 self.state[cnt, self.output_channel:, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.common_state[:, min_y:max_y, min_x:max_x])
                 self.context[cnt, 0, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(dist[min_y:max_y, min_x:max_x])
                 self.next_state[cnt, next_y, next_x] = 1
+                self.aids[cnt] = aids[channel][j]
                 # add other agents at the same time
                 self.mask[cnt, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.common_state[:, min_y:max_y, min_x:max_x].sum(axis=0) == 0)
                 for channel_tmp in range(self.output_channel):
@@ -313,10 +350,32 @@ class MeshDataset(Dataset):
                         self.positions[cnt, j2, channel_tmp, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.mnw_data.distance_from(cur_point2)[min_y:max_y, min_x:max_x])
                         self.pis[cnt, j2, channel_tmp, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.mnw_data.distance_from(next_point2)[min_y:max_y, min_x:max_x])
                 cnt += 1
+
     def split_into(self, ratio):
         # ratio: [train, test, validation]
         mesh_traj_data = self.mesh_traj_data.split_into(ratio)
         return [MeshDataset(mesh_traj_data[i], self.d, channel=self.channel) for i in range(len(ratio))]
+
+    def get_current_state(self, idxs, d_idxs):
+        # for simulation
+        # idxs: (num_agents, 2)
+        # state: (prop_dim, 2d+1, 2d+1)
+        # context: (context_num, 2d+1, 2d+1)
+        points = [self.mnw_data.cells[idx[0]][idx[1]].center for idx in idxs]
+        d_points = [self.mnw_data.cells[d_idx[0]][d_idx[1]].center for d_idx in d_idxs]
+
+        state = torch.zeros((len(idxs), self.prop_dim, 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
+        context = torch.zeros((len(idxs), 1, 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
+        for i, idx in enumerate(idxs):
+            min_x, min_y, max_x, max_y = self.mnw_data.get_surroundings_idxs(points[i], self.d)
+            min_y_local = min_y - (idx[0] - self.d)
+            max_y_local = max_y - (idx[0] - self.d)
+            min_x_local = min_x - (idx[1] - self.d)
+            max_x_local = max_x - (idx[1] - self.d)
+
+            state[i, :, min_y_local:max_y_local, min_x_local:max_x_local] = self.mnw_data.get_surroundings_prop(points[i], self.d)
+            context[i, 0, min_y_local:max_y_local, min_x_local:max_x_local] = self.mnw_data.distance_from(d_points[i])[min_y:max_y, min_x:max_x]
+        return state, context
 
 
 class PatchDataset(Dataset):

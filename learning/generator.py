@@ -40,6 +40,41 @@ class CNNGen(nn.Module):
             return self.cnn(inputs, w=self.w)[:, i, :, :]
         return self.cnn(inputs, w=self.w)
 
+    def get_pi(self, dataset, d_weight, w=None, i=None):
+        # merginal probability of link transition
+        # dataset: GridDataset
+        # output: [link_num, link_num] or [oc, link_num, link_num]
+        # w : (w_dim)
+        if w is not None:
+            self.w = w
+        if i is not None:
+            trans_mat = torch.zeros((self.nw_data.link_num, self.nw_data.link_num), dtype=torch.float32)
+        else:
+            trans_mat = torch.zeros((self.output_channel, self.nw_data.link_num, self.nw_data.link_num), dtype=torch.float32)
+        for d_node_id in self.nw_data.nids:
+            # inputs : [link_num, f+c, 3, 3]
+            # masks : [link_num, 9]
+            # link_idxs : [link_num, 9]
+            if d_weight[d_node_id] <= 0:
+                continue
+            inputs, masks, link_idxs = dataset.get_all_input(d_node_id)
+            out = self.cnn(inputs, w=self.w)  # (link_num, oc, 3, 3)
+            if i is not None:
+                out = out[:, i, :, :]
+                out = torch.where(masks > 0, out.view(out.shape[0], -1), tensor(-9e15, dtype=torch.float32, device=out.device))  # (link_num, 9)
+                pi = F.softmax(out, dim=1)  # (link_num, 9)
+                for j in range(self.link_num):
+                    tmp_link_idxs = link_idxs[j][link_idxs[j] >= 0]
+                    trans_mat[j, tmp_link_idxs] = trans_mat[j, link_idxs] + pi[j][link_idxs[j] >= 0] * d_weight[d_node_id]
+            else:
+                out = torch.where(masks.unsqueeze(1) > 0, out.view(*out.shape[:2], -1), tensor(-9e15, dtype=torch.float32, device=out.device))
+                pi = F.softmax(out, dim=1)  # (link_num, oc, 9)
+                for j in range(self.link_num):
+                    tmp_link_idxs = link_idxs[j][link_idxs[j] >= 0]
+                    trans_mat[:, j, tmp_link_idxs] = trans_mat[:, j, link_idxs] + pi[j][link_idxs[j] >= 0] * d_weight[d_node_id]
+        trans_mat = trans_mat / d_weight.sum()
+        return trans_mat
+
     def generate(self, num, w=None):
         # num: int or list(self.output_channel elements)
         # fake_data: [{pid: {d_node: d_node, path: [link]}}]
@@ -129,6 +164,7 @@ class GNNGen(nn.Module):
         self.nw_data = nw_data
         self.emb_dim = emb_dim
         self.feature_num = nw_data.feature_num
+        self.context_num = nw_data.context_feature_num
         self.image_feature_num = image_feature_num
         self.output_channel = output_channel
         self.adj_matrix = nn.parameter.Parameter(tensor(nw_data.edge_graph).to(torch.float32).to_dense(), requires_grad=False)
@@ -147,13 +183,13 @@ class GNNGen(nn.Module):
             "sln": sln, 
             "w_dim": w_dim
             }
-        self.gnn = GT(self.feature_num + self.image_feature_num, emb_dim, self.adj_matrix, **kwargs)  # (bs, link_num, emb_dim)
+        self.gnn = GT(self.feature_num + self.context_num + self.image_feature_num, emb_dim, self.adj_matrix, **kwargs)  # (bs, link_num, emb_dim)
         self.ff = FF(emb_dim*2, output_channel, emb_dim*4, sn=sn)
 
         self.w = None
 
     def forward(self, x, w=None, i=None):
-        # x: (bs, link_num, feature_num)
+        # x: (bs, link_num, feature_num + context_num + image_feature_num)
         # output: (bs, link_num, link_num) or (trip_num, oc, link_num, link_num)
         if w is not None:
             self.w = w
@@ -168,6 +204,30 @@ class GNNGen(nn.Module):
             return logits
         else:
             return logits[:, i, :, :]
+
+    def get_pi(self, dataset, d_weight, w=None, i=None):
+        # merginal probability of link transition
+        # dataset: PPEmbedDataset
+        # output: [link_num, link_num] or [oc, link_num, link_num]
+        # w : (w_dim)
+        if w is not None:
+            self.w = w
+        if i is not None:
+            trans_mat = torch.zeros((self.nw_data.link_num, self.nw_data.link_num), dtype=torch.float32)
+        else:
+            trans_mat = torch.zeros((self.output_channel, self.nw_data.link_num, self.nw_data.link_num), dtype=torch.float32)
+        for d_node_id in self.nw_data.nids:
+            # inputs : [link_num, f+ c]
+            # a_matrix : [link_num, link_num]
+            if d_weight[d_node_id] <= 0:
+                continue
+            inputs, a_mat = dataset.get_all_input(d_node_id)
+            inputs = inputs.unsqueeze(0)  # (1, link_num, f+c)
+            logits = self(inputs, w=self.w, i=i).squeeze(0)  # (link_num, link_num) or (oc, link_num, link_num)
+            pi = F.softmax(logits, dim=1)
+            trans_mat = trans_mat + pi * d_weight[d_node_id]
+        trans_mat = trans_mat / d_weight.sum()
+        return trans_mat
 
     def set_w(self, w):
         # w : (trip_num, w_dim)

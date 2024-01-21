@@ -98,6 +98,7 @@ class MeshTraj:
         idxs = []
         next_idxs = []
         d_idxs = []
+        aids = []
         for i, data in enumerate(data_list):
             idxs_tmp = self.mnw_data.get_idx(data[["x", "y"]].values)  # (num_agents, 2)
             next_idxs_tmp = self.mnw_data.get_idx(data[["next_x", "next_y"]].values)  # (num_agents, 2)
@@ -105,13 +106,14 @@ class MeshTraj:
             idxs.append(idxs_tmp)
             next_idxs.append(next_idxs_tmp)
             d_idxs.append(d_idx_tmp)
-        return idxs, next_idxs, d_idxs
+            aids.append(data["ID"].values)
+        return idxs, next_idxs, d_idxs, aids
 
     # visualize
     def show_action(self, idx, save_path=None):
         fig = plt.figure(figsize=(6.4, 2.4 * self.mnw_data.prop_dim))
         prop = self.get_state(idx)
-        idxs, next_idxs, d_idxs = self.get_action(idx)
+        idxs, next_idxs, d_idxs, aids = self.get_action(idx)
         for i in range(self.mnw_data.prop_dim):
             ax = fig.add_subplot(self.mnw_data.prop_dim, 1, i + 1)
             ax.set_title("Prop {}".format(i))
@@ -138,7 +140,7 @@ class MeshTraj:
         vs = []
         ws = []
         for idx in range(len(self)):
-            idxs, next_idxs, d_idxs = self.get_action(idx)
+            idxs, next_idxs, d_idxs, aids = self.get_action(idx)
             if prop_idx < len(idxs):
                 for j in range(len(idxs[prop_idx])):
                     xs.append(idxs[prop_idx][j][1])

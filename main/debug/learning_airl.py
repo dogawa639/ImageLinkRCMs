@@ -21,7 +21,7 @@ if __name__ == "__main__":
     read_general = config["GENERAL"]
     model_type = read_general["model_type"]  # cnn or gnn
     device = read_general["device"]
-    # model
+    # data
     read_data = config["DATA"]
     node_path = read_data["node_path"]
     link_path = read_data["link_path"]

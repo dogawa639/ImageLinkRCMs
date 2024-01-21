@@ -33,7 +33,7 @@ class MeshAIRL:
 
         self.generators = [generator.to(device) for generator in generators]
         self.discriminators = [discriminator.to(device) for discriminator in discriminators]
-        self.dataset = dataset # MeshDataset [train+test]
+        self.dataset = dataset  # MeshDataset [train+test]
         self.model_dir = model_dir
         self.hinge_loss = hinge_loss
         self.hinge_thresh = -log(tensor(hinge_thresh, dtype=torch.float32, device=device, requires_grad=False))

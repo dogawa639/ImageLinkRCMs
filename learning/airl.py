@@ -305,7 +305,8 @@ class AIRL:
         if self.use_index:
             # image_feature: tensor(link_num, emb_dim)
             # batch[3]: tensor(bs, 9)
-            image_feature_tmp = image_feature[batch[3], :].transpose(1, 2).view(batch[3].shape[0], -1, 3, 3)
+            image_feature_tmp = image_feature[batch[3], :] * (batch[3].unsqueeze(-1) >= 0)
+            image_feature_tmp = image_feature_tmp.transpose(1, 2).view(batch[3].shape[0], -1, 3, 3)
             inputs = torch.cat((batch[0], image_feature_tmp), dim=1)
         else:
             print(image_feature.shape, batch[0].shape)

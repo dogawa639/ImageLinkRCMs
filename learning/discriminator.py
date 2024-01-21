@@ -68,6 +68,11 @@ class CNNDis(nn.Module):
             return f_val, util, ext, val
         return f_val[:, i, :, :], util[:, i, :, :], ext[:, i, :, :], val[:, i, :, :]
 
+    def get_f_val(self, util, ext, val):
+        if util.dim() == 3:
+            return util + self.ext_coeff * ext + self.gamma * val - val[:, 1, 1].view(-1, 1, 1)
+        return util + self.ext_coeff * ext + self.gamma * val - val[:, :, 1, 1].view(-1, self.output_channel, 1, 1)
+
     def set_w(self, w):
         # w : (w_dim)
         self.w = w
@@ -86,6 +91,7 @@ class GNNDis(nn.Module):
         self.nw_data = nw_data
         self.emb_dim = emb_dim
         self.feature_num = nw_data.feature_num
+        self.context_num = nw_data.context_feature_num
         self.output_channel = output_channel
         self.adj_matrix = nn.parameter.Parameter(tensor(nw_data.edge_graph).to(torch.float32).to_dense(), requires_grad=False)
         self.image_feature_num = image_feature_num
@@ -115,8 +121,8 @@ class GNNDis(nn.Module):
             "w_dim": w_dim
             } 
 
-        self.gnn_local = nn.ModuleList([GAT(self.feature_num + self.image_feature_num, self.emb_dim, self.adj_matrix, **kwargs_local) for _ in range(output_channel)])
-        self.gnn_global = nn.ModuleList([GAT(self.feature_num + self.image_feature_num, self.emb_dim, self.adj_matrix, **kwargs_global) for _ in range(output_channel)])
+        self.gnn_local = nn.ModuleList([GAT(self.feature_num + self.context_num + self.image_feature_num, self.emb_dim, self.adj_matrix, **kwargs_local) for _ in range(output_channel)])
+        self.gnn_global = nn.ModuleList([GAT(self.feature_num + self.context_num + self.image_feature_num, self.emb_dim, self.adj_matrix, **kwargs_global) for _ in range(output_channel)])
 
         self.util = FF(self.emb_dim*2, 1, self.emb_dim*2, act_fn=lambda x : -softplus(x), sn=sn)  # global
 
@@ -127,7 +133,7 @@ class GNNDis(nn.Module):
         self.w = None
 
     def forward(self, x, pi, w=None, i=None):
-        # x: (trip_num, link_num, feature_num) or (link_num, feature_num)
+        # x: (trip_num, link_num, feature_num + context_num + image_feature_num) or (link_num, feature_num + context_num + image_feature_num)
         # pi: (trip_num, oc, link_num, link_num)
         # output: f_val (trip_num, link_num, link_num)
         if w is not None:
@@ -169,6 +175,9 @@ class GNNDis(nn.Module):
 
         f_val = util + self.ext_coeff * ext + self.gamma * val.unsqueeze(-2) - val.unsqueeze(-1)
         return f_val, util, ext, val.unsqueeze(-1)
+
+    def get_f_val(self, util, ext, val):
+        return util + self.ext_coeff * ext + self.gamma * val.unsqueeze(-2) - val.unsqueeze(-1)
 
     def set_w(self, w):
         # w : (trip_num, w_dim)
@@ -226,6 +235,10 @@ class UNetDis(nn.Module):
 
         f_val = util + self.ext_coeff * ext.sum(dim=1, keepdims=False) + self.gamma * val - val[:, d, d].view(-1, 1, 1)
         return f_val, util, ext, val
+
+    def get_f_val(self, util, ext, val):
+        d = int((util.shape[-1] - 1) / 2)
+        return util + self.ext_coeff * ext.sum(dim=1, keepdims=False) + self.gamma * val - val[:, d, d].view(-1, 1, 1)
 
     def save(self, model_dir, i=None):
         if i is None:

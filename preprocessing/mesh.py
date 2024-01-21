@@ -35,11 +35,17 @@ class Cell:
         elif type(points) == np.ndarray:
             return (self.x_min <= points[:, 0]) & (points[:, 0] < self.x_max) & (self.y_min <= points[:, 1]) & (points[:, 1] < self.y_max)  # (num_points)
 
-    def add_prop(self, prop_dim):
+    def add_props(self, prop_dim):
         self.prop[prop_dim] += 1
 
-    def remove_prop(self, prop_dim):
-        if self.prop[prop_dim] > 0:
+    def remove_props(self, prop_dim):
+        if type(prop_dim) == int:
+            if self.prop[prop_dim] > 0:
+                self.prop[prop_dim] -= 1
+            else:
+                raise ValueError("prop_dim must be positive or 0")
+            self.prop[prop_dim] -= 1
+        elif (self.prop[prop_dim] > 0).all():
             self.prop[prop_dim] -= 1
         else:
             raise ValueError("prop_dim must be positive or 0")
@@ -67,6 +73,7 @@ class Cell:
     @staticmethod
     def get_distance(cell1, cell2):
         return np.sqrt((cell1.x - cell2.x) ** 2 + (cell1.y - cell2.y) ** 2)
+
 
 class MeshNetwork:
     def __init__(self, coords, w_dim, h_dim, prop_dim):
@@ -148,9 +155,9 @@ class MeshNetwork:
         for i, cell in enumerate(cells):
             if cell is None:
                 continue
-            cell.add_prop(prop_dims[i])
+            cell.add_props(prop_dims[i])
 
-    def move_prop(self, from_points, to_points, prop_dims):
+    def move_props(self, from_points, to_points, prop_dims):
         # from_points: np.array([[x1, y1], [x2, y2], ...])
         # to_points: np.array([[x1, y1], [x2, y2], ...])
         # prop_dims: np.array([prop_dim1, prop_dim2, ...])
@@ -161,10 +168,10 @@ class MeshNetwork:
         for i, (from_cell, to_cell) in enumerate(zip(from_cells, to_cells)):
             if from_cell is None or to_cell is None:
                 continue
-            from_cell.remove_prop(prop_dims[i])
-            to_cell.add_prop(prop_dims[i])
+            from_cell.remove_props(prop_dims[i])
+            to_cell.add_props(prop_dims[i])
 
-    def remove_prop(self, points, prop_dims):
+    def remove_props(self, points, prop_dims):
         # points: np.array([[x1, y1], [x2, y2], ...])
         # prop_dims: np.array([prop_dim1, prop_dim2, ...])
         if len(points) != len(prop_dims):
@@ -173,7 +180,8 @@ class MeshNetwork:
         for i, cell in enumerate(cells):
             if cell is None:
                 continue
-            cell.remove_prop(prop_dims[i])
+            cell.remove_props(prop_dims[i])
+
     def get_prop_array(self, min_x_idx=None, min_y_idx=None, max_x_idx=None, max_y_idx=None):
         # min_x_idx, min_y_idx, max_x_idx, max_y_idx: int
         # return: (prop_dim, max_y_idx - min_y_idx, max_x_idx - min_x_idx)
@@ -187,23 +195,47 @@ class MeshNetwork:
         if max_y_idx is None:
             max_y_idx = self.h_dim
 
-        min_x_idx = max(min_x_idx, 0)
-        min_y_idx = max(min_y_idx, 0)
-        max_x_idx = min(max_x_idx, self.w_dim)
-        max_y_idx = min(max_y_idx, self.h_dim)
+        min_x_idx = min(max(min_x_idx, 0), self.w_dim)
+        min_y_idx = min(max(min_y_idx, 0), self.h_dim)
+        max_x_idx = max(min(max_x_idx, self.w_dim), 0)
+        max_y_idx = max(min(max_y_idx, self.h_dim), 0)
 
         return np.array([[self.cells[y_idx][x_idx].prop for x_idx in range(min_x_idx, max_x_idx)] for y_idx in range(min_y_idx, max_y_idx)]).transpose((2, 0, 1))  # (prop_dim, max_y_idx - min_y_idx, max_x_idx - min_x_idx)
 
     def get_surroundings_prop(self, point, d_x, d_y=None):
         # point: (x, y)
         # d: int
-        # return: (d * 2 + 1, d * 2 + 1, prop_dim)
+        # return: (prop_dim, d * 2 + 1, d * 2 + 1)
         if d_y is None:
             d_y = d_x
         idx = self.get_idx(point)
         if idx is None:
             return None
-        return self.get_prop_array(idx[0] - d_x, idx[1] - d_y, idx[0] + d_x + 1, idx[1] + d_y + 1)
+        return self.get_prop_array(idx[1] - d_x, idx[0] - d_y, idx[1] + d_x + 1, idx[0] + d_y + 1)
+
+    def get_surroundings_idxs(self, point, d_x, d_y=None):
+        # point: (x, y)
+        # d: int
+        # return: (d * 2 + 1, d * 2 + 1, 2)
+        if d_y is None:
+            d_y = d_x
+        idx = self.get_idx(point)
+        if idx is None:
+            return None
+        min_x = min(max(idx[1] - d_x, 0), self.w_dim)
+        min_y = min(max(idx[0] - d_y, 0), self.h_dim)
+        max_x = max(min(idx[1] + d_x + 1, self.w_dim), 0)
+        max_y = max(min(idx[0] + d_y + 1, self.h_dim), 0)
+
+        return (min_x, min_y, max_x, max_y)
+
+    def get_center_points(self, idxs):
+        # idxs: np.array(num_points, 2) or tuple
+        # return: (num_points, 2) or tuple
+        if type(idxs) == tuple:
+            return self.cells[idxs[0]][idxs[1]].center
+        elif type(idxs) == np.ndarray:
+            return np.array(self.cells[idxs[i, 0]][idxs[i, 1]].center for i in range(len(idxs)))
 
     # visualize
     def show_props(self):
@@ -215,6 +247,11 @@ class MeshNetwork:
             ax.set_aspect("equal")
             ax.imshow(prop_array[i, :, :])
         plt.show()
+
+    def clear_prop(self, prop_dim):
+        for i in range(self.h_dim):
+            for j in range(self.w_dim):
+                self.cells[i][j].prop[prop_dim] = 0
 
     @staticmethod
     def get_angle(start_point, end_points):
