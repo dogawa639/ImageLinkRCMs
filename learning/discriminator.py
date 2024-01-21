@@ -33,7 +33,7 @@ class CNNDis(nn.Module):
 
         self.util = CNN3x3((3, 3), (self.total_feature, self.total_feature*2, output_channel), act_fn=lambda x : -softplus(x), residual=True, sn=sn, sln=sln, w_dim=w_dim)
 
-        self.ext = CNN3x3((3, 3), (self.feature_num+self.image_feature_num+output_channel, (self.feature_num+self.image_feature_num+output_channel)*2, output_channel), act_fn=lambda x : -softplus(x), residual=True, sn=sn, sln=sln, w_dim=w_dim)
+        self.ext = CNN3x3((3, 3), (self.feature_num+self.image_feature_num+output_channel, (self.feature_num+self.image_feature_num+output_channel)*2, output_channel), act_fn=lambda x : -softplus(x), residual=True, sn=True, sln=sln, w_dim=w_dim)
 
         self.val = CNN1x1((3, 3), (self.total_feature, self.total_feature*2, output_channel), act_fn=lambda x : -softplus(x), sn=sn, sln=sln, w_dim=w_dim)
 
@@ -126,7 +126,7 @@ class GNNDis(nn.Module):
 
         self.util = FF(self.emb_dim*2, 1, self.emb_dim*2, act_fn=lambda x : -softplus(x), sn=sn)  # global
 
-        self.ext = FF(self.emb_dim*2+output_channel, 1, (self.emb_dim+output_channel)*2, act_fn=lambda x : -softplus(x), sn=sn)  # local + pi
+        self.ext = FF(self.emb_dim*2+output_channel, 1, (self.emb_dim+output_channel)*2, act_fn=lambda x : -softplus(x), sn=True)  # local + pi
 
         self.val = FF(self.emb_dim, 1, self.emb_dim*2, act_fn=lambda x : -softplus(x), sn=sn)  # global
 
@@ -205,7 +205,7 @@ class UNetDis(nn.Module):
         self.ext_coeff = ext_coeff
 
         self.util = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=3)
-        self.ext = UNet(self.total_feature + output_channel * 2, 1, sn=sn, dropout=dropout, depth=3)  # state + other agent's (position + pi)
+        self.ext = UNet(self.total_feature + output_channel * 2, 1, sn=True, dropout=dropout, depth=3)  # state + other agent's (position + pi)
         self.val = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=3)
 
     def forward(self, input, positions, pis):
