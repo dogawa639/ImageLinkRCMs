@@ -50,7 +50,7 @@ class MeshAIRL:
         optimizer_gs = [optim.Adam(self.generators[i].parameters(), lr=lr_g) for i in range(self.output_channel)]
         optimizer_ds = [optim.Adam(self.discriminators[i].parameters(), lr=lr_d) for i in range(self.output_channel)]
 
-        dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle}
+        dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle, "drop_last": True}
 
         min_criteria = 1e10
         for e in range(epochs):
@@ -105,8 +105,8 @@ class MeshAIRL:
 
                         # discriminator update
                         optimizer_ds[channel].zero_grad()
-                        with detect_anomaly():
-                            loss_d.backward(retain_graph=True)
+                        #with detect_anomaly():
+                        loss_d.backward(retain_graph=True)
                         optimizer_ds[channel].step()
 
                         mode_loss_d.append(loss_d.clone().detach().cpu().item())
@@ -115,8 +115,8 @@ class MeshAIRL:
                             # f0 and encoder update
 
                             optimizer_gs[channel].zero_grad()
-                            with detect_anomaly():
-                                loss_g.backward(retain_graph=True)
+                            #with detect_anomaly():
+                            loss_g.backward(retain_graph=True)
 
                             # generator update
                             optimizer_gs[channel].step()
@@ -160,7 +160,10 @@ class MeshAIRL:
                     fp += fp_tmp.detach().cpu().item()
                     tn += tn_tmp.detach().cpu().item()
                     fn += fn_tmp.detach().cpu().item()
-                accuracy = (tp + tn) / (tp + tn + fp + fn)
+                if tp + fp == 0:
+                    accuracy = 0.0
+                else:
+                    accuracy = tp / (tp + fp)
                 criteria = -ll
 
                 epoch_loss_g.append(np.mean(mode_loss_g))
@@ -192,6 +195,65 @@ class MeshAIRL:
         if image_file is not None:
             log.save_fig(image_file)
         log.close()
+
+    def test_models(self, conf_file, dataset, image_file=None):
+        print("test start.")
+        dataset_kwargs = {"batch_size": 16, "shuffle": False, "drop_last": True}
+
+        epoch_accuracy = []
+        epoch_ll = []
+        epoch_criteria = []
+        for channel in range(self.output_channel):  # transportation mode
+            dataset.set_channel(channel)
+            dataloaders = DataLoader(dataset, **dataset_kwargs)  # [train_dataloader, val_dataloader]
+            mode_loss_g = []
+            mode_loss_d = []
+
+            self.eval()
+            ll = 0.0
+            tp = 0.0
+            fp = 0.0
+            tn = 0.0
+            fn = 0.0
+            ll0 = 0.0
+            for state, context, next_state, mask, positions, pis in dataloaders:
+                inputs = torch.cat((state, context), dim=1).to(
+                    self.device)  # (bs, prop_dim+context_num, 2d+1, 2d+1)
+                next_state = next_state.to(self.device)  # (bs, 2d+1, 2d+1)
+                mask = mask.to(self.device)  # (bs, 2d+1, 2d+1)
+                positions = positions.to(self.device)  # (bs, max_agent_num, output_channel, 2d+1, 2d+1)
+                pis = pis.to(self.device)  # (bs, max_agent_num, output_channel, 2d+1, 2d+1)
+
+                logits = self.generators[channel](inputs)  # raw_data_fake requires_grad=True, (bs, 2d+1, 2d+1)
+                logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32,
+                                                              device=logits.device))
+                pi = self.get_pi_from_logits(logits)  # requires_grad=True, (bs, 2d+1, 2d+1)
+
+                # loss function calculation
+                log_d_g, log_d_d = self.get_log_d(inputs, next_state, mask, positions, pis, pi,
+                                                  channel)  # discriminator inference performed inside
+                loss_g, loss_d = self.loss(log_d_g, log_d_d, self.hinge_loss)
+
+                ll_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(inputs, next_state, mask, positions, pis,
+                                                                           channel)
+                ll += ll_tmp.detach().cpu().item()
+                tp += tp_tmp.detach().cpu().item()
+                fp += fp_tmp.detach().cpu().item()
+                tn += tn_tmp.detach().cpu().item()
+                fn += fn_tmp.detach().cpu().item()
+                ll0 += (log_d_g[0] * next_state).sum().detach().cpu().item()
+            accuracy = tp / (tp + fp)
+            criteria = -ll
+            epoch_accuracy.append(accuracy)
+            epoch_ll.append(ll)
+            epoch_criteria.append(criteria)
+
+        for i in range(self.output_channel):
+            print(f"channel {i}: accuracy: {epoch_accuracy[i]}, ll: {epoch_ll[i]}, criteria: {epoch_criteria[i]}")
+
+        print("test end.")
+
+
 
     def loss(self, log_d_g, log_d_d, hinge_loss=False):
         # log_d_real, log_d_fake: (log d_for_g, log 1-d_for_g), (log d_for_d, log 1-d_for_d)

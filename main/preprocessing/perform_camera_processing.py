@@ -19,7 +19,7 @@ if __name__ == "__main__":
     movie_dir = read_save["movie_dir"]
 
     YOLO = False
-    BYTE = False
+    BYTE = True
     CLEANING = True
 
     img_points = [
@@ -61,7 +61,9 @@ if __name__ == "__main__":
         print("Yolo finish.")
 
     if BYTE:
-        for i, rel_dir in enumerate(["調査地点①", "調査地点④", "調査地点⑤"]):
+        for i, rel_dir in enumerate(["調査地点1", "調査地点4", "調査地点5"]):
+            if i == 0 or i == 2:
+                continue
             tmp_dir = os.path.join(movie_dir, rel_dir)
             for cur_dir, dirs, files in os.walk(tmp_dir):
                 for file in files:
@@ -89,7 +91,9 @@ if __name__ == "__main__":
         # remove previous files
         rm_dirs = []
         rm_files = []
-        for i, rel_dir in enumerate(["調査地点①", "調査地点④", "調査地点⑤"]):
+        for i, rel_dir in enumerate(["調査地点1", "調査地点4", "調査地点5"]):
+            if i == 0 or i == 2:
+                continue
             tmp_dir = os.path.join(movie_dir, rel_dir)
             for cur_dir, dirs, files in os.walk(tmp_dir):
                 for tmp in dirs:
@@ -103,7 +107,9 @@ if __name__ == "__main__":
         for tmp in rm_files:
             os.remove(tmp)
 
-        for i, rel_dir in enumerate(["調査地点①", "調査地点④", "調査地点⑤"]):
+        for i, rel_dir in enumerate(["調査地点1", "調査地点4", "調査地点5"]):
+            if i == 0 or i == 2:
+                continue
             tmp_dir = os.path.join(movie_dir, rel_dir)
             for cur_dir, dirs, files in os.walk(tmp_dir):
                 for file in files:

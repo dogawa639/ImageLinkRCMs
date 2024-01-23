@@ -160,7 +160,7 @@ class PPEmbedDataset(Dataset):
         pos_embedding = np.zeros((self.link_num, self.feature_num), dtype=np.float32)
         lid2idx = {lid: i for i, lid in enumerate(self.nw_data.lids)}
         for i, edge in enumerate(path):
-            if type(edge) != int:
+            if type(edge) != int and type(edge) != np.int64:
                 edge = edge.id
             if i % 2 == 0:
                 pos_embedding[lid2idx[edge], :] = np.sin(np.arange(self.feature_num) / 10000 ** (i / self.feature_num))
@@ -174,11 +174,13 @@ class PPEmbedDataset(Dataset):
         col = []
         lid2idx = {lid: i for i, lid in enumerate(self.nw_data.lids)}
         for i, edge in enumerate(path):
-            if type(edge) != int:
+            if type(edge) != int and type(edge) != np.int64:
                 edge = edge.id
             if i < len(path) - 1:
                 row.append(lid2idx[edge])
-                col.append(lid2idx[path[i+1].id])
+                if type(path[i+1]) != int and type(path[i+1]) != np.int64:
+                    path[i+1] = path[i+1].id
+                col.append(lid2idx[path[i+1]])
         adj_matrix = coo_matrix((np.ones(len(row)), (row, col)), shape=(self.link_num, self.link_num), dtype=np.float32).tocsr()
         return adj_matrix
 
@@ -340,7 +342,7 @@ class MeshDataset(Dataset):
                 self.next_state[cnt, next_y, next_x] = 1
                 self.aids[cnt] = aids[channel][j]
                 # add other agents at the same time
-                self.mask[cnt, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.common_state[:, min_y:max_y, min_x:max_x].sum(axis=0) == 0)
+                self.mask[cnt, min_y_local:max_y_local, min_x_local:max_x_local] = 1.0#tensor(self.common_state[:, min_y:max_y, min_x:max_x].sum(axis=0) == 0)
                 for channel_tmp in range(self.output_channel):
                     for j2 in range(idxs[channel_tmp].shape[0]):
                         if channel_tmp == channel and j2 == j:

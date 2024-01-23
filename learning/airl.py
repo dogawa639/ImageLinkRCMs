@@ -58,7 +58,7 @@ class AIRL:
             self.f0 = self.f0.to(device)
     
     def train_models(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
-              train_ratio=0.8, max_train_num=10000, d_epoch=5, lr_f0=0.01, lr_e=0.0, image_file=None):
+              ratio=(0.8, 0.2), max_train_num=10000, d_epoch=5, lr_f0=0.01, lr_e=0.0, image_file=None):
         log = Logger(os.path.join(self.model_dir, "log.json"), conf_file, figsize=(6.4, 4.8 * 3))  #loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,accuracy,ll,criteria
 
         optimizer_g = optim.Adam(self.generator.parameters(), lr=lr_g)
@@ -71,7 +71,7 @@ class AIRL:
 
         dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle}
         dataloaders_real = [[DataLoader(tmp, **dataset_kwargs)
-                            for tmp in dataset.split_into((min(train_ratio, max_train_num / len(dataset) * batch_size), 1-train_ratio))]
+                            for tmp in dataset.split_into((min(ratio[0], max_train_num / len(dataset) * batch_size), ratio[1]))]
                             for dataset in self.datasets]  # [train_dataloader, test_dataloader]
         
         min_criteria = 1e10
@@ -126,8 +126,7 @@ class AIRL:
 
                         # discriminator update
                         optimizer_d.zero_grad()
-                        with detect_anomaly():
-                            loss_d.backward(retain_graph=True)
+                        loss_d.backward(retain_graph=True)
                         optimizer_d.step()
 
                         mode_loss_d.append(loss_d.clone().detach().cpu().item())
@@ -140,8 +139,7 @@ class AIRL:
                                 optimizer_e.zero_grad()
 
                             optimizer_g.zero_grad()
-                            with detect_anomaly():
-                                loss_g.backward(retain_graph=True)
+                            loss_g.backward(retain_graph=True)
 
                             if self.use_w:
                                 optimizer_0.step()
@@ -196,7 +194,7 @@ class AIRL:
                     fp += fp_tmp.detach().cpu().item()
                     tn += tn_tmp.detach().cpu().item()
                     fn += fn_tmp.detach().cpu().item()
-                accuracy = (tp + tn) / (tp + tn + fp + fn)
+                accuracy = (tp) / (tp + fp)
                 criteria = -ll
 
                 epoch_loss_g.append(np.mean(mode_loss_g))
@@ -222,6 +220,14 @@ class AIRL:
                 print(f"save model. minimum criteria: {min_criteria}")
                 self.save()
 
+            if e == int(epochs * 3 / 4):
+                optimizer_g = optim.Adam(self.generator.parameters(), lr=lr_g / 10)
+                optimizer_d = optim.Adam(self.discriminator.parameters(), lr=lr_d / 10)
+                if self.use_w:
+                    optimizer_0 = optim.Adam(self.f0.parameters(), lr=lr_f0 / 10)
+                if train_encoder:
+                    optimizer_e = optim.Adam(self.encoder.parameters(), lr=lr_e / 10)
+
             t2 = time.perf_counter()
             print("epoch: {}, loss_g_val: {:.4f}, loss_d_val: {:.4f}, criteria: {:.4f}, time: {:.4f}".format(
                 e, epoch_loss_g_val[-1], epoch_loss_d_val[-1], criteria, t2 - t1))
@@ -229,6 +235,67 @@ class AIRL:
         if image_file is not None:
             log.save_fig(image_file)
         log.close()
+
+    def test(self, datasets):
+        dataset_kwargs = {"batch_size": 64, "shuffle": False}
+        dataloaders_test = [DataLoader(dataset, **dataset_kwargs)for dataset in datasets]
+
+        print("test start.")
+        self.eval()
+        ll = 0.0
+        tp = 0.0
+        fp = 0.0
+        tn = 0.0
+        fn = 0.0
+        accuracy_test = []
+        ll_test = []
+        criteria_test = []
+        for i, dataloader_test in enumerate(dataloaders_test):
+            mode_loss_g_test = []
+            mode_loss_d_test = []
+            for batch_real in dataloader_test:
+                batch_real = [tensor(tmp.to_dense(), dtype=torch.float32, device=self.device) for tmp in batch_real]
+                w = None
+                if self.use_w:
+                    w = self.f0(batch_real[-1])  # (bs, w_dim)
+                if self.use_encoder:
+                    # append image_feature to the original feature
+                    batch_real = self.cat_image_feature(batch_real, w=w)
+
+                if self.sln:
+                    logits = self.generator(batch_real[0], w=w)  # raw_data_fake requires_grad=True
+                else:
+                    logits = self.generator(batch_real[0])  # raw_data_fake requires_grad=True
+                mask = batch_real[1].unsqueeze(1)
+                if self.use_index:
+                    mask = mask.view(-1, 1, logits.shape[-2], logits.shape[-1])
+                logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32,
+                                                              device=logits.device))
+                pi = self.get_pi_from_logits(logits)
+                log_d_g, log_d_d = self.get_log_d(batch_real, pi, i,
+                                                  w=w)  # discriminator inference performed inside
+                loss_g, loss_d = self.loss(log_d_g, log_d_d, self.hinge_loss)
+
+                mode_loss_g_test.append(loss_g.clone().detach().cpu().item())
+                mode_loss_d_test.append(loss_d.clone().detach().cpu().item())
+
+                ll_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(batch_real, pi, i, w=w)
+                ll += ll_tmp.detach().cpu().item()
+                tp += tp_tmp.detach().cpu().item()
+                fp += fp_tmp.detach().cpu().item()
+                tn += tn_tmp.detach().cpu().item()
+                fn += fn_tmp.detach().cpu().item()
+            accuracy = (tp ) / (tp + fp)
+            criteria = -ll
+
+            accuracy_test.append(accuracy)
+            ll_test.append(ll)
+            criteria_test.append(criteria)
+        for i in range(len(accuracy_test)):
+            print("test accuracy {}: {:.4f}, ll: {:.4f}, criteria: {:.4f}".format(i, accuracy_test[i], ll_test[i],
+                                                                                  criteria_test[i]))
+        print("test end.")
+
 
     def loss(self, log_d_g, log_d_d, hinge_loss=False):
         # log_d_g, log_d_d: (log d_for_g, log 1-d_for_g), (log d_for_d, log 1-d_for_d)

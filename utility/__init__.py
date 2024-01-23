@@ -110,6 +110,7 @@ def read_csv(file, encodings=["utf-8","shift-jis", "cp932"]):
             return df
         except:
             pass
+    print("file path: ",file)
     raise Exception("CSV file not loaded.")
 
 

@@ -257,7 +257,10 @@ class YoLoV5Detect:
                 target = obj_df.loc[obj_df["id"] == tmp_id, ["frame_num", "2d_x", "2d_y"]].sort_values(by="frame_num")
                 plt.plot(target["2d_x"], target["2d_y"], color=colors[i], marker="o", markersize=1.5)
         if out_png_path is not None:
-            plt.savefig(out_png_path)
+            try:
+                plt.savefig(out_png_path)
+            except:
+                print("failed to save png.", out_png_path)
         plt.show()
 
     def write_traj_statistics(self, obj_df, out_csv_path=None, out_png_path=None):

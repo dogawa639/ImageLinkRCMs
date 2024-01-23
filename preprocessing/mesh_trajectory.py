@@ -49,6 +49,8 @@ class MeshTraj:
         self.times = sorted(np.unique(np.concatenate([data["time"].values for data in data_list])))
 
         self.mnw_data = mnw_data  # mesh network
+        for i in range(len(data_list)):
+            print("MeshTraj {}: data_list num: {}, time num: {}, agent_num: {}".format(i, len(self.data_list[i]), len(self.times), len(np.unique(self.data_list[i]["ID"].values))))
 
     def __len__(self):
         return len(self.times)

@@ -43,6 +43,8 @@ class Logger:
         else:
             self.data[key] = [value]
 
+        dump_json(self.data, self.json_file)
+
         v_list = []
         label_list = []
         for k, v in self.data.items():
@@ -79,6 +81,7 @@ class Logger:
 
     def add_prop(self, key, value):
         self.data[key] = value
+        dump_json(self.data, self.json_file)
 
     def save_fig(self, out_path):
         v_list = []

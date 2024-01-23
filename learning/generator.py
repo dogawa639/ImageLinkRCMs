@@ -18,7 +18,7 @@ __all__ = ["CNNGen", "GNNGen", "UNetGen"]
 # input: (bs, link_num, feature_num)
 # output: (bs, link_num, link_num) or (trip_num, oc, link_num, link_num)
 class CNNGen(nn.Module):
-    def __init__(self, nw_data, output_channel, image_feature_num=0, max_num=40, sln=True, w_dim=10):
+    def __init__(self, nw_data, output_channel, image_feature_num=0, max_num=40, sln=False, w_dim=10):
         super().__init__()
 
         self.nw_data = nw_data
