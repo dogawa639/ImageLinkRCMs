@@ -23,10 +23,10 @@ if __name__ == "__main__":
     onehot_data_path = read_data["onehot_data_path"]
     onehot_data_dir = read_data["onehot_image_datadir"]
 
-    SATELLITE = True
+    SATELLITE = False
     ONEHOT = True
     SETFOLDER = True
-    COMPRESS = True
+    COMPRESS = False
     nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path)
 
     if SATELLITE:
