@@ -48,12 +48,12 @@ if __name__ == "__main__":
     d_epoch = int(read_train["d_epoch"])  # int
     # model setting
     read_model = config["MODELSETTING"]
-    use_f0 = bool(read_model["use_f0"])  # bool
+    use_f0 = True if read_model["use_f0"] == "true" else False  # bool
     emb_dim = int(read_model["emb_dim"])  # int
     enc_dim = int(read_model["enc_dim"])  # int
     in_emb_dim = json.loads(read_model["in_emb_dim"])  # int or None
     drop_out = float(read_model["drop_out"])  # float
-    sn = bool(read_model["sn"])  # bool
+    sn = True if read_model["sn"] == "true" else False   # bool
     sln = False#bool(read_model["sln"])  # bool
     h_dim = int(read_model["h_dim"])  # int
     w_dim = int(read_model["w_dim"])  # int
@@ -73,6 +73,7 @@ if __name__ == "__main__":
 
     TRAIN = True
     TEST = True
+    SHAP = True
 
     # instance creation
     use_index = (model_type == "cnn")
@@ -94,9 +95,10 @@ if __name__ == "__main__":
         datasets = [PPEmbedDataset(pp, h_dim=h_dim) for pp in pp_list]
         datasets_test = [PPEmbedDataset(PP(ppath, nw_data), h_dim=h_dim) for ppath in pp_path_test]
     image_data = None
-    #image_data_list = [os.path.join(image_data_dir, "satellite_image_processed.json"), os.path.join(onehot_data_dir, "onehot_image_processed.json")]
-    #image_data_list = [LinkImageData(image_data, nw_data) for image_data in image_data_list]
-    #image_data = CompressedImageData(image_data_list)
+    if image_data_path is not None:
+        image_data_list = [os.path.join(image_data_dir, "satellite_image_processed.json"), os.path.join(onehot_data_dir, "onehot_image_processed.json")]
+        image_data_list = [LinkImageData(image_data, nw_data) for image_data in image_data_list]
+        image_data = CompressedImageData(image_data_list)
 
     # model_names : [str] [discriminator, generator, (f0, w_encoder), (encoder)]
     model_names = ["CNNDis", "CNNGen"] if model_type == "cnn" else ["GNNDis", "GNNGen"]
@@ -110,7 +112,7 @@ if __name__ == "__main__":
         "nw_data": nw_data,
         "output_channel": output_channel,
         "emb_dim": emb_dim,
-        "enc_dim": 0,#enc_dim,
+        "enc_dim": enc_dim,
         "in_emb_dim": in_emb_dim,
         "drop_out": drop_out,
         "sn": sn,
@@ -141,8 +143,8 @@ if __name__ == "__main__":
     else:
         discriminator, generator, f0, w_encoder, encoder = get_models(model_names, **kwargs)
 
-    image_data = None
-    encoder = None
+    #image_data = None
+    #encoder = None
     ratio = (0.8, 0.2)
 
     airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=image_data, encoder=encoder, h_dim=h_dim, emb_dim=emb_dim, f0=f0,
@@ -153,3 +155,6 @@ if __name__ == "__main__":
     if TEST:
         airl.load()
         airl.test(datasets_test)
+    if SHAP:
+        airl.load()
+        airl.get_shap(datasets_test, 0)

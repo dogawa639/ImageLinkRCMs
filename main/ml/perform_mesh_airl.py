@@ -23,6 +23,9 @@ if __name__ == "__main__":
     # data
     read_data = config["DATA"]
     traj_dir = read_data["traj_dir"]
+    # save
+    read_save = config["SAVE"]
+    figure_dir = read_save["figure_dir"]
 
     # train setting
     read_train = config["TRAIN"]
@@ -50,15 +53,16 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    TRAIN = True
-    TEST = True
+    TRAIN = False
+    TEST = False
+    SHOWVAL = True
 
     # instance creation
-    traj_path = [os.path.join(traj_dir, "220928", "4", "trajectory_train_0.csv"),
-                 os.path.join(traj_dir, "220928", "4", "trajectory_train_2.csv")]
+    traj_path = [os.path.join(traj_dir, "220928", "4", "trajectory_0_1sec_train.csv"),
+                 os.path.join(traj_dir, "220928", "4", "trajectory_2_1sec_train.csv")]
 
-    traj_path_test = [os.path.join(traj_dir, "220928", "4", "trajectory_test_0.csv"),
-                 os.path.join(traj_dir, "220928", "4", "trajectory_test_2.csv")]
+    traj_path_test = [os.path.join(traj_dir, "220928", "4", "trajectory_0_1sec_test_min.csv"),
+                 os.path.join(traj_dir, "220928", "4", "trajectory_2_1sec_test_min.csv")]
 
     for i in range(len(traj_path)):
         traj = pd.read_csv(traj_path[i])
@@ -107,3 +111,16 @@ if __name__ == "__main__":
         dataset = MeshDataset(mesh_traj, mesh_dist)
         airl.load()
         airl.test_models(CONFIG, dataset)
+
+    if SHOWVAL:
+        channel = 0
+        aid = 10611
+        mesh_traj_test = MeshTraj(traj_path_test, mnw_data)
+        dataset = MeshDataset(mesh_traj_test, mesh_dist)
+        airl = MeshAIRL(generators, discriminators, dataset, model_dir,
+                        hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, device=device)
+        airl.dataset.mesh_traj_data.show_agent_num()
+        #airl.show_one_path(channel, aid)
+        airl.load()
+        airl.show_val(channel, aid, os.path.join(figure_dir, f"total_mesh_val_{channel}_{aid}.gif"))
+

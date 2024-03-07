@@ -29,6 +29,8 @@ class MeshTraj:
         for i in range(len(data_list)):
             data_list[i]["time"] = pd.to_datetime(data_list[i]["time"])
             data_list[i] = data_list[i].sort_values("time")
+            if len(data_list[i]) == 0:
+                continue
             if start_time is None:
                 start_time = data_list[i]["time"].iloc[0]
             else:
@@ -84,6 +86,10 @@ class MeshTraj:
             result.append(MeshTraj(total_data_list[j], self.mnw_data))
         return result
 
+    def get_mesh_traj_one_agent(self, channel, aid):
+        data_list = [data[data["ID"] == aid] if i == channel else data for i, data in enumerate(self.data_list)]
+        return MeshTraj(data_list, self.mnw_data, time_resolution=self.time_resolution.total_seconds())
+
     def get_state(self, idx):
         t = self.times[idx]
         data_list = [data[data["time"] == t] for data in self.data_list]
@@ -95,6 +101,11 @@ class MeshTraj:
         return prop
 
     def get_action(self, idx):
+        # idx: time index
+        # idxs: (num_agents, 2) current position index
+        # next_idxs: (num_agents, 2) next position index
+        # d_idxs: (num_agents, 2) destination index
+        # aids: (num_agents) agent id
         t = self.times[idx]
         data_list = [data[data["time"] == t] for data in self.data_list]
         idxs = []
@@ -111,8 +122,19 @@ class MeshTraj:
             aids.append(data["ID"].values)
         return idxs, next_idxs, d_idxs, aids
 
+    def get_traj_idx_one_agent(self, channel, aid):
+        data = self.data_list[channel][self.data_list[channel]["ID"] == aid]
+        return self.mnw_data.get_idx(data[["x", "y"]].values)  # (num_points, 2)
+
+    def get_aggregated(self, paths=None):
+        if paths is not None:
+            for i in range(len(self.data_list)):
+                self.data_list[i].to_csv(paths[i], index=False)
+        return self.data_list
+
     # visualize
     def show_action(self, idx, save_path=None):
+        # idx: time index
         fig = plt.figure(figsize=(6.4, 2.4 * self.mnw_data.prop_dim))
         prop = self.get_state(idx)
         idxs, next_idxs, d_idxs, aids = self.get_action(idx)
@@ -154,6 +176,20 @@ class MeshTraj:
         ax.quiver(xs, ys, ts, us, vs, ws, linewidth=1.5, length=1.0, arrow_length_ratio=0.1,
                                   color="red")
 
+        if save_path is not None:
+            fig.savefig(save_path)
+        plt.show()
+
+    def show_agent_num(self, save_path=None):
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 1, 1)
+        ax.set_title("Agent num")
+        ax.set_xlabel("t")
+        ax.set_ylabel("num")
+        for channel in range(len(self.data_list)):
+            num = [(self.data_list[channel]["time"] == self.times[idx]).sum() for idx in range(len(self))]
+            ax.plot(self.times, num, label=f"channel {channel}")
+        ax.legend()
         if save_path is not None:
             fig.savefig(save_path)
         plt.show()

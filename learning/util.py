@@ -22,7 +22,7 @@ def get_models(model_names, nw_data=None, output_channel=None, emb_dim=None, enc
         if model_name == "FNW":
             models.append(FF(h_dim, w_dim, bias=True, sn=False))
         elif model_name == "CNNDis":
-            models.append(CNNDis(nw_data, output_channel, image_feature_num=enc_dim, sn=True, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))
+            models.append(CNNDis(nw_data, output_channel, image_feature_num=enc_dim, sn=False, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))
         elif model_name == "GNNDis":
             models.append(GNNDis(nw_data, emb_dim, output_channel, image_feature_num=enc_dim, gamma=gamma, in_emb_dim=in_emb_dim, num_head=num_head, dropout=drop_out, depth=depth, sn=True, sln=sln, w_dim=w_dim, ext_coeff=ext_coeff))
         elif model_name == "CNNGen":

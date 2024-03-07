@@ -31,7 +31,7 @@ class MesoAIRL(AIRL):
         self.micro_airl = micro_airl
 
         self.feature_num = self.datasets[0].nw_data.feature_num
-        self.alpha = FF(self.feature_num, 1, act_fn=F.sigmoid, sn=False)
+        self.alpha = FF(self.feature_num, 1, act_fn=F.sigmoid, sn=False).to(self.device)
 
         self.utils_micro = None
         self.exts_micro = None
@@ -82,7 +82,7 @@ class MesoAIRL(AIRL):
                     # raw_data requires_grad=True
                     # Grid: (sum(links), 3, 3) corresponds to next_links
                     # Emb: (trip_num, link_num, link_num) sparse, corresponds to transition_matrix
-                    batch_real = [tensor(tmp.to_dense(), dtype=torch.float32, device=self.device) for tmp in batch_real]
+                    batch_real = [tmp.to_dense().to(torch.float32).to(self.device) for tmp in batch_real]
                     bs = batch_real[0].shape[0]
                     w = None
                     if self.use_w:
@@ -153,7 +153,7 @@ class MesoAIRL(AIRL):
                 tn = 0.0
                 fn = 0.0
                 for batch_real in dataloader_val:
-                    batch_real = [tensor(tmp.to_dense(), dtype=torch.float32, device=self.device) for tmp in batch_real]
+                    batch_real = [tmp.to_dense().to(torch.float32).to(self.device) for tmp in batch_real]
                     w = None
                     if self.use_w:
                         w = self.f0(batch_real[-1])  # (bs, w_dim)
@@ -236,8 +236,8 @@ class MesoAIRL(AIRL):
             input, mask, next_link, _ = batch
         _, util_macro, ext_macro, val = self.discriminator.get_vals(input, pi, i=i, w=w)  # Grid(sum(links), 3, 3), Emb (bs, 2d+1, 2d+1)
         alpha = self.alpha(input[:, :self.feature_num, :, :].permute(0, 2, 3, 1)).squeeze(-1)  # (bs, *choice_space)
-        util_micro = tensor(self.utils_micro[i, :], dtype=torch.float32)  # (link_num)
-        ext_micro = tensor(self.exts_micro[i, :], dtype=torch.float32)  # (link_num)
+        util_micro = tensor(self.utils_micro[i, :], dtype=torch.float32, device=self.device)  # (link_num)
+        ext_micro = tensor(self.exts_micro[i, :], dtype=torch.float32, device=self.device)  # (link_num)
 
         if self.use_index:
             util_micro = util_micro[idxs.flatten()].reshape(util_macro.shape)
@@ -271,8 +271,8 @@ class MesoAIRL(AIRL):
         _, util_macro, ext_macro, val = self.discriminator.get_vals(input, pi, i=i,
                                                                     w=w)  # Grid(sum(links), 3, 3), Emb (bs, 2d+1, 2d+1)
         alpha = self.alpha(input[:, :self.feature_num, :, :].permute(0, 2, 3, 1)).squeeze(-1)  # (bs, *choice_space)
-        util_micro = tensor(self.utils_micro[i, :], dtype=torch.float32)  # (link_num)
-        ext_micro = tensor(self.exts_micro[i, :], dtype=torch.float32)  # (link_num)
+        util_micro = tensor(self.utils_micro[i, :], dtype=torch.float32, device=self.device)  # (link_num)
+        ext_micro = tensor(self.exts_micro[i, :], dtype=torch.float32, device=self.device)  # (link_num)
 
         if self.use_index:
             util_micro = util_micro[idxs.flatten()].reshape(util_macro.shape)

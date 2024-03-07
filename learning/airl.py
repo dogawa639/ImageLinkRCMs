@@ -4,12 +4,13 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import ConstantLR
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
-from torch.autograd import detect_anomaly
+from torch.autograd import detect_anomaly, Variable
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import datetime
+import shap
 
 import time
 import os
@@ -151,7 +152,9 @@ class AIRL:
                             mode_loss_g.append(loss_g.clone().detach().cpu().item())
 
                             pi = pi.detach()
-                            w = w.detach()
+                            if w is not None:
+                                w = w.detach()
+                            batch_real = [tmp.detach() for tmp in batch_real]
 
                         del log_d_g, log_d_d, loss_d, loss_g
 
@@ -242,11 +245,13 @@ class AIRL:
 
         print("test start.")
         self.eval()
+        ll0 = 0.0
         ll = 0.0
         tp = 0.0
         fp = 0.0
         tn = 0.0
         fn = 0.0
+        ll0_test = []
         accuracy_test = []
         ll_test = []
         criteria_test = []
@@ -285,16 +290,101 @@ class AIRL:
                 fp += fp_tmp.detach().cpu().item()
                 tn += tn_tmp.detach().cpu().item()
                 fn += fn_tmp.detach().cpu().item()
-            accuracy = (tp ) / (tp + fp)
+                ll0 -= np.log(mask.clone().detach().cpu().numpy().reshape(mask.shape[0], -1).sum(1)).sum()
+            accuracy = (tp + fp) / (tp + fp + tn + fn)
             criteria = -ll
 
+            ll0_test.append(ll0)
             accuracy_test.append(accuracy)
             ll_test.append(ll)
             criteria_test.append(criteria)
         for i in range(len(accuracy_test)):
-            print("test accuracy {}: {:.4f}, ll: {:.4f}, criteria: {:.4f}".format(i, accuracy_test[i], ll_test[i],
+            print("test accuracy {}: {:.4f}, ll0: {:.4f}, ll: {:.4f}, criteria: {:.4f}".format(i, accuracy_test[i], ll0_test[i], ll_test[i],
                                                                                   criteria_test[i]))
         print("test end.")
+
+    def get_shap(self, datasets, i, sample_num=50):
+        if self.use_w:
+            raise NotImplementedError("get_shap is not implemented when use_w is True.")
+        # shap for generator
+        dataset_kwargs = {"batch_size": 1, "shuffle": False}
+        dataloaders_test = [DataLoader(dataset, **dataset_kwargs) for dataset in datasets]
+
+        inputs = None
+        for tmp_i, dataloader_test in enumerate(dataloaders_test):
+            if tmp_i != i:
+                continue
+            for batch_real in dataloader_test:
+                # Grid: (sum(links), 3, 3) corresponds to next_links
+                # Emb: (trip_num, link_num, link_num) sparse, corresponds to transition_matrix
+                batch_real = [tensor(tmp.to_dense(), dtype=torch.float32, device=self.device) for tmp in batch_real]
+                bs = batch_real[0].shape[0]
+                w = None
+                if self.use_w:
+                    w = self.f0(batch_real[-1])  # (bs, w_dim)
+                if self.use_encoder:
+                    # append image_feature to the original feature
+                    batch_real = self.cat_image_feature(batch_real, w=w)
+
+                if inputs is None:
+                    inputs = batch_real[0]
+                else:
+                    inputs = torch.cat([inputs, batch_real[0]], dim=0)
+            break
+
+        inputs_test = inputs[sample_num:2 * sample_num, ...]
+        inputs = inputs[:sample_num, ...]
+        inputs_shape = inputs.shape
+        if self.use_index:
+            # inputs: (bs, c, 3, 3)
+            link_feature_num = inputs_shape[1]
+            inputs = inputs.clone().detach().cpu().numpy().reshape(inputs_shape[0], -1)
+            self.generator.eval()
+            self.generator.to("cpu")
+            f = lambda x: self.generator(Variable(torch.from_numpy(x.reshape(-1, *inputs_shape[1:]))),
+                                         i=i).detach().cpu().numpy().sum((1, 2))
+            print(inputs.shape)
+            print(f(inputs).shape)
+            explainer = shap.KernelExplainer(f, inputs)
+
+            inputs_shape = inputs_test.shape
+            inputs_test = inputs_test.detach().cpu().numpy().reshape(inputs_shape[0], -1)
+            print(f(inputs_test).shape)
+            sv = explainer.shap_values(inputs_test)
+            print(sv.shape)
+            print("shap_values", sv)
+            sv_reshaped = sv.reshape(-1, *inputs_shape[1:]).transpose(0, 2, 3, 1).reshape(-1, link_feature_num)
+        else:
+            # inputs: (bs, link_num, c)
+            link_feature_num = inputs_shape[2]
+            inputs = inputs.clone().detach().cpu().numpy().reshape(inputs_shape[0], -1)
+            self.generator.eval()
+            self.generator.to("cpu")
+            f = lambda x: self.generator(Variable(torch.from_numpy(x.reshape(-1, *inputs_shape[1:]))),
+                                         i=i).detach().cpu().numpy().sum((1, 2))
+            print(inputs.shape)
+            print(f(inputs).shape)
+            explainer = shap.KernelExplainer(f, inputs)
+
+            inputs_shape = inputs_test.shape
+            inputs_test = inputs_test.detach().cpu().numpy().reshape(inputs_shape[0], -1)
+            print(f(inputs_test).shape)
+            sv = explainer.shap_values(inputs_test)
+            print(sv.shape)
+            print("shap_values", sv)
+            sv_reshaped = sv.reshape(-1, *inputs_shape[1:]).reshape(-1, link_feature_num)
+
+        shap.initjs()
+        shap.summary_plot(sv_reshaped, feature_names=[f'Feature{i}' for i in range(link_feature_num)], plot_type="dot", show=False)
+        plt.savefig(os.path.join(self.model_dir, f"shap_dot_{i}.png"))
+        plt.show()
+        shap.initjs()
+        shap.summary_plot(sv_reshaped, feature_names=[f'Feature{i}' for i in range(link_feature_num)], plot_type="bar",
+                          show=False)
+        plt.savefig(os.path.join(self.model_dir, f"shap_bar_{i}.png"))
+        plt.show()
+        self.generator.to(self.device)
+        return sv_reshaped
 
 
     def loss(self, log_d_g, log_d_d, hinge_loss=False):
@@ -336,6 +426,16 @@ class AIRL:
 
         return (log_d_g, log_1_d_g), (log_d_d, log_1_d_d)
 
+    #def get_shap_values(self, inputs_train, pi_train, inputs_test, pi_test, i):
+        # input Grid: (sum(links), c, 3, 3) corresponds to next_links
+        # input Emb: (trip_num, link_num, link_num, c) sparse corresponds to transition_matrix
+        # output, pi: (bs, *choice_space)
+    #    def f(inputs_pi):
+            # inputs_pi: (bs, *choice_space)
+    #        f_val = self.discriminator(inputs, pi, i=i)
+    #        return f_val
+
+
     def get_creteria(self, batch, pi, i, w=None):
         # ll, TP, FP, FN, TN
         if self.use_index:
@@ -372,7 +472,10 @@ class AIRL:
         if self.use_index:
             # image_feature: tensor(link_num, emb_dim)
             # batch[3]: tensor(bs, 9)
-            image_feature_tmp = image_feature[batch[3], :] * (batch[3].unsqueeze(-1) >= 0)
+            if image_feature.dim() == 3:
+                image_feature_tmp = image_feature[0, batch[3].long(), :] * (batch[3].unsqueeze(-1) >= 0)
+            else:
+                image_feature_tmp = image_feature[batch[3].long(), :] * (batch[3].unsqueeze(-1) >= 0)
             image_feature_tmp = image_feature_tmp.transpose(1, 2).view(batch[3].shape[0], -1, 3, 3)
             inputs = torch.cat((batch[0], image_feature_tmp), dim=1)
         else:

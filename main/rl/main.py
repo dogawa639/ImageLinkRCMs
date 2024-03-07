@@ -78,6 +78,9 @@ if __name__ == "__main__":
     interaction_estimation = True
     v_ml_test = False
 
+    train = True
+    test = False
+
     if z_test:
         x = np.array([-0.95709107, -0.86090123, -0.50018837, 0.48622069])
         m = rl_ped.comp_m(x)
@@ -139,61 +142,73 @@ if __name__ == "__main__":
         nw_data.plot_paths(paths)
 
     if interaction_estimation:
-
-        def fn_ll_ped(x, rl_ped, sample_ped):
-            # x = np.concatenate([x_ped, x_car])
-            mix_term_ped = rl_car.comp_m(x[rl_ped.prop_len + 2:-1])
-            return -rl_ped.get_ll(x[:rl_ped.prop_len + 2], sample_ped, mix_term=mix_term_ped, use_bias=True)
-
-
-        def fn_ll_car(x, rl_car, sample_car):
-            mix_term_car = rl_ped.comp_m(x[:rl_car.prop_len + 1], use_bias=True)
-            return -rl_car.get_ll(x[rl_car.prop_len + 2:], sample_car, mix_term=mix_term_car)
+        if train:
+            def fn_ll_ped(x, rl_ped, sample_ped):
+                # x = np.concatenate([x_ped, x_car])
+                mix_term_ped = rl_car.comp_m(x[rl_ped.prop_len + 2:-1])
+                return -rl_ped.get_ll(x[:rl_ped.prop_len + 2], sample_ped, mix_term=mix_term_ped, use_bias=True)
 
 
-        x = np.zeros((rl_ped.prop_len + 2) + (rl_car.prop_len + 1), dtype=np.float32)
-        dx = 100
-        x_ped_len = rl_ped.prop_len + 2
-        x_car_len = rl_car.prop_len + 1
-        log1 = Logger(os.path.join(result_dir, "rl/log.txt"), "")
-        tol = 1e-6
-        cnt = 0
-        while dx > 1e-2:
-            pre_x = x.copy()
-            x0 = np.zeros(x_ped_len, dtype=np.float32)
-            fn_ped = lambda x_ped: fn_ll_ped(np.concatenate((x_ped, x[x_ped_len:])), rl_ped, sample_ped) + 0.001 * np.sum(np.power(x_ped, 2))
-            fprime_ped = lambda x: scipy.optimize.approx_fprime(x, fn_ped)
-            opt_kwargs_ped = {"method": "BFGS", "jac": fprime_ped, "tol": tol}
-            res_ped = scipy.optimize.minimize(fn_ped, x0, **opt_kwargs_ped)
-            x[:x_ped_len] = res_ped.x
-            log1.add_log("x", x)
-            log1.add_log("fn", res_ped.fun)
+            def fn_ll_car(x, rl_car, sample_car):
+                mix_term_car = rl_ped.comp_m(x[:rl_car.prop_len + 1], use_bias=True)
+                return -rl_car.get_ll(x[rl_car.prop_len + 2:], sample_car, mix_term=mix_term_car)
 
-            x0 = np.zeros(x_car_len, dtype=np.float32)
-            fn_car = lambda x_car: fn_ll_car(np.concatenate((x[:x_ped_len], x_car)), rl_car, sample_car) + 0.001 * np.sum(np.power(x_car, 2))
-            fprime_car = lambda x: scipy.optimize.approx_fprime(x, fn_car)
-            opt_kwargs_car = {"method": "BFGS", "jac": fprime_car, "tol": tol}
-            res_car = scipy.optimize.minimize(fn_car, x0, **opt_kwargs_car)
-            x[x_ped_len:] = res_car.x
-            log1.add_log("x", x)
-            log1.add_log("fn", res_car.fun)
 
-            dx = np.sqrt(np.mean(np.power(x - pre_x, 2)))
-            log1.add_log("dx", dx)
+            x = np.zeros((rl_ped.prop_len + 2) + (rl_car.prop_len + 1), dtype=np.float32)
+            dx = 100
+            x_ped_len = rl_ped.prop_len + 2
+            x_car_len = rl_car.prop_len + 1
+            log1 = Logger(os.path.join(result_dir, "rl/log.txt"), "")
+            tol = 1e-6
+            cnt = 0
+            while dx > 1e-2:
+                pre_x = x.copy()
+                x0 = np.zeros(x_ped_len, dtype=np.float32)
+                fn_ped = lambda x_ped: fn_ll_ped(np.concatenate((x_ped, x[x_ped_len:])), rl_ped, sample_ped) + 0.001 * np.sum(np.power(x_ped, 2))
+                fprime_ped = lambda x: scipy.optimize.approx_fprime(x, fn_ped)
+                opt_kwargs_ped = {"method": "BFGS", "jac": fprime_ped, "tol": tol}
+                res_ped = scipy.optimize.minimize(fn_ped, x0, **opt_kwargs_ped)
+                x[:x_ped_len] = res_ped.x
+                log1.add_log("x", x)
+                log1.add_log("fn", res_ped.fun)
 
-            cnt += 1
-        print("finish estimation.")
-        log1.close()
+                x0 = np.zeros(x_car_len, dtype=np.float32)
+                fn_car = lambda x_car: fn_ll_car(np.concatenate((x[:x_ped_len], x_car)), rl_car, sample_car) + 0.001 * np.sum(np.power(x_car, 2))
+                fprime_car = lambda x: scipy.optimize.approx_fprime(x, fn_car)
+                opt_kwargs_car = {"method": "BFGS", "jac": fprime_car, "tol": tol}
+                res_car = scipy.optimize.minimize(fn_car, x0, **opt_kwargs_car)
+                x[x_ped_len:] = res_car.x
+                log1.add_log("x", x)
+                log1.add_log("fn", res_car.fun)
 
-        x_ped = x[:x_ped_len]
-        x_car = x[x_ped_len:]
+                dx = np.sqrt(np.mean(np.power(x - pre_x, 2)))
+                log1.add_log("dx", dx)
 
-        mix_term_car = rl_ped.comp_m(x_ped[:-1], use_bias=True)
-        mix_term_ped = rl_car.comp_m(x_car[:-1])
+                cnt += 1
+            print("finish estimation.")
+            log1.close()
 
-        rl_ped.write_result(res_ped, sample_ped_test, mix_term=mix_term_ped, use_bias=True,
-                            file=os.path.join(result_dir, "rl", "rl_ped_single.txt"))
-        rl_car.write_result(res_car, sample_car_test, mix_term=mix_term_car, file=os.path.join(result_dir, "rl", "rl_car_single.txt"))
+            x_ped = x[:x_ped_len]
+            x_car = x[x_ped_len:]
+
+            mix_term_car = rl_ped.comp_m(x_ped[:-1], use_bias=True)
+            mix_term_ped = rl_car.comp_m(x_car[:-1])
+
+            rl_ped.write_result(res_ped, sample_ped_test, mix_term=mix_term_ped, use_bias=True,
+                                file=os.path.join(result_dir, "rl", "rl_ped_single.txt"))
+            rl_car.write_result(res_car, sample_car_test, mix_term=mix_term_car,
+                                file=os.path.join(result_dir, "rl", "rl_car_single.txt"))
+
+        if test:
+            x_ped = rl_ped.load_result(os.path.join(result_dir, "rl", "1/rl_ped_single.txt"))
+            x_car = rl_car.load_result(os.path.join(result_dir, "rl", "1/rl_car_single.txt"))
+
+            mix_term_car = rl_ped.comp_m(x_ped[:-1], use_bias=True)
+            mix_term_ped = rl_car.comp_m(x_car[:-1])
+
+            rl_ped.write_result(res_ped, sample_ped, mix_term=mix_term_ped, use_bias=True,
+                                file=os.path.join(result_dir, "rl", "1/rl_ped_single2.txt"))
+            rl_car.write_result(res_car, sample_car, mix_term=mix_term_car, file=os.path.join(result_dir, "rl", "1/rl_car_single2.txt"))
 
     if v_ml_test:
         x_ped = [-0.95709107, -0.86090123, -0.50018837, 0.48622069, -0.85128209, -0.77433027]  # x[:x_ped_len]

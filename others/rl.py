@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import time
 
+import re
 import os
 
 from utility import *
@@ -227,6 +228,14 @@ class RL:
         if file is not None:
             with open(file, "w") as f:
                 f.write(string)
+    def load_result(self, file):
+        with open(file, "r") as f:
+            lines = f.readlines()
+        for line in lines:
+            line = line.split(" = ")
+            if "parameter" in line[0]:
+                param_str = re.findall(r'[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?', line[1])
+                return np.array([float(x) for x in param_str])
 
     # forward
     def forward(self, p, num, d_link_id=None, d_node_id=None, o_node_id=None, mix_term=None, use_bias=False, max_step=100):

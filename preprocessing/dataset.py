@@ -318,7 +318,7 @@ class MeshDataset(Dataset):
             prop = self.mesh_traj_data.get_state(i)[:self.output_channel]  # (prop_dim, H, W)
             idxs, next_idxs, d_idxs, aids = self.mesh_traj_data.get_action(i)  # (num_channel, num_agents, 2), (num_channel, num_agents, 2), (num_channel, num_agents, 2), (num_channel, num_agents)
 
-            for j in range(idxs[channel].shape[0]):
+            for j in range(idxs[channel].shape[0]):  # num_agents
                 min_y = max(0, idxs[channel][j, 0] - self.d)
                 max_y = min(prop.shape[1], idxs[channel][j, 0] + self.d + 1)
                 min_x = max(0, idxs[channel][j, 1] - self.d)
@@ -344,19 +344,26 @@ class MeshDataset(Dataset):
                 # add other agents at the same time
                 self.mask[cnt, min_y_local:max_y_local, min_x_local:max_x_local] = 1.0#tensor(self.common_state[:, min_y:max_y, min_x:max_x].sum(axis=0) == 0)
                 for channel_tmp in range(self.output_channel):
-                    for j2 in range(idxs[channel_tmp].shape[0]):
+                    for j2 in range(idxs[channel_tmp].shape[0]):  # num_agents
                         if channel_tmp == channel and j2 == j:
                             continue
                         cur_point2 = self.mnw_data.cells[idxs[channel_tmp][j2, 0]][idxs[channel_tmp][j2, 1]].center
                         next_point2 = self.mnw_data.cells[next_idxs[channel_tmp][j2, 0]][next_idxs[channel_tmp][j2, 1]].center
-                        self.positions[cnt, j2, channel_tmp, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.mnw_data.distance_from(cur_point2)[min_y:max_y, min_x:max_x])
-                        self.pis[cnt, j2, channel_tmp, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(self.mnw_data.distance_from(next_point2)[min_y:max_y, min_x:max_x])
+                        cur_point2_dist = tensor(self.mnw_data.distance_from(cur_point2)[min_y:max_y, min_x:max_x])
+                        next_point2_dist = tensor(self.mnw_data.distance_from(next_point2)[min_y:max_y, min_x:max_x])
+                        if (cur_point2_dist == 0).sum() > 0 and (next_point2_dist == 0).sum() > 0:
+                            self.positions[cnt, j2, channel_tmp, min_y_local:max_y_local, min_x_local:max_x_local] = cur_point2_dist
+                            self.pis[cnt, j2, channel_tmp, min_y_local:max_y_local, min_x_local:max_x_local] = next_point2_dist
                 cnt += 1
 
     def split_into(self, ratio):
         # ratio: [train, test, validation]
         mesh_traj_data = self.mesh_traj_data.split_into(ratio)
         return [MeshDataset(mesh_traj_data[i], self.d, channel=self.channel) for i in range(len(ratio))]
+
+    def get_mesh_dataset_one_agent(self, channel, aid):
+        mesh_traj_data = self.mesh_traj_data.get_mesh_traj_one_agent(channel, aid)
+        return MeshDataset(mesh_traj_data, self.d, channel=channel)
 
     def get_current_state(self, idxs, d_idxs):
         # for simulation

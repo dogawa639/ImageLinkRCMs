@@ -77,7 +77,7 @@ if __name__ == "__main__":
     train_dataloader = DataLoader(train_data, **loader_kwargs)
     val_dataloader = DataLoader(val_data, **loader_kwargs)
     test_dataloader = DataLoader(test_data, **loader_kwargs)
-
+    num_classes = train_data.y.shape[1]
     model = classifier_resnet50(weights_backbone=ResNet50_Weights.DEFAULT, num_classes=num_classes, num_backbones=2).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     def loss_fn(out, y):

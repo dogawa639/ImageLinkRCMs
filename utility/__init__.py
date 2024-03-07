@@ -41,7 +41,11 @@ def dump_pickle(data, file):
 def heron(a, b, c):
     # a, b, c: length of triangle
     s = (a + b + c) / 2
-    return np.sqrt(s * (s - a) * (s - b) * (s - c))
+    if s * (s - a) * (s - b) * (s - c) >= 0:
+        return np.sqrt(s * (s - a) * (s - b) * (s - c))
+    else:
+        print("Invalid value for Heron's formula.", a, b, c)
+        return 0
 
 
 def heron_vertex(v1, v2, v3):

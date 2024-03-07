@@ -237,6 +237,11 @@ class MeshNetwork:
         elif type(idxs) == np.ndarray:
             return np.array(self.cells[idxs[i, 0]][idxs[i, 1]].center for i in range(len(idxs)))
 
+    def clear_prop(self, prop_dim):
+        for i in range(self.h_dim):
+            for j in range(self.w_dim):
+                self.cells[i][j].prop[prop_dim] = 0
+
     # visualize
     def show_props(self):
         prop_array = self.get_prop_array(0, 0, self.w_dim, self.h_dim)
@@ -248,10 +253,61 @@ class MeshNetwork:
             ax.imshow(prop_array[i, :, :])
         plt.show()
 
-    def clear_prop(self, prop_dim):
-        for i in range(self.h_dim):
-            for j in range(self.w_dim):
-                self.cells[i][j].prop[prop_dim] = 0
+    def show_grid(self, ax=None, vals=None, *args, **kwargs):
+        show_fig = False
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(1, 1, 1)
+            show_fig = True
+        if vals is None:
+            vals = np.full((self.h_dim, self.w_dim, 3), 255)
+        vals = np.flipud(vals)
+        im = ax.imshow(vals, *args, **kwargs)
+        # grid
+        ax.set_xticks(np.arange(-0.5, self.w_dim, 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, self.h_dim, 1), minor=True)
+        ax.grid(which='minor', color="black", linestyle='-', linewidth=0.5)
+        # ticks labels
+        ax.set_xticks(np.arange(0, self.w_dim, 5))
+        ax.set_yticks(np.arange(0, self.h_dim, 5))
+        ax.set_xticklabels(self.center_coords[0, ::5, 0], rotation=30)
+        ax.set_yticklabels(self.center_coords[::-5, 0, 1])
+        # remove minor ticks
+        ax.tick_params(which="minor", bottom=False, left=False)
+
+        if show_fig:
+            plt.show()
+        return im
+
+    def show_path(self, path_idxs, vals=None):
+        # path_idxs: np.array(num_points, 2) (y_idx, x_idx)
+        # vals: np.array((h_dim, w_dim))
+        fig = plt.figure()
+        if vals is None:
+            vals = np.full((self.h_dim, self.w_dim, 3), 255)
+
+        vals = np.flipud(vals)
+        ax = fig.add_subplot(1, 1, 1)
+        ax.imshow(vals)
+        # grid
+        ax.set_xticks(np.arange(-0.5, self.w_dim, 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, self.h_dim, 1), minor=True)
+        ax.grid(which='minor', color="black", linestyle='-', linewidth=0.5)
+        # ticks labels
+        ax.set_xticks(np.arange(0, self.w_dim, 5))
+        ax.set_yticks(np.arange(0, self.h_dim, 5))
+        ax.set_xticklabels(self.center_coords[0, ::5, 0], rotation=30)
+        ax.set_yticklabels(self.center_coords[::-5, 0, 1])
+        # remove minor ticks
+        ax.tick_params(which="minor", bottom=False, left=False)
+
+        x = path_idxs[:-1, 1]
+        y = self.h_dim - path_idxs[:-1, 0] - 1
+        u = path_idxs[1:, 1] - path_idxs[:-1, 1]
+        v = - (path_idxs[1:, 0] - path_idxs[:-1, 0])
+        ax.quiver(x, y, u, v, angles='xy', scale_units='xy', scale=1, color="red")
+        plt.show()
+
 
     @staticmethod
     def get_angle(start_point, end_points):

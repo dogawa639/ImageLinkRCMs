@@ -67,7 +67,7 @@ if __name__ == "__main__":
                      "drop_last": True}
 
     stimage_dataset = StreetViewDataset(streetview_data_path, link_prop_path, **kwargs)
-    train_data, val_data, test_data = stimage_dataset.split_into((0.03, 0.01, 0.02))
+    train_data, val_data, test_data = stimage_dataset.split_into((0.06, 0.01, 0.02))
     train_data_num = len(train_data)
     val_data_num = len(val_data)
     test_data_num = len(test_data)
@@ -77,6 +77,7 @@ if __name__ == "__main__":
     val_dataloader = DataLoader(val_data, **loader_kwargs)
     test_dataloader = DataLoader(test_data, **loader_kwargs)
 
+    num_classes = train_data.y.shape[1]
     model = classifier_resnet50(weights_backbone=ResNet50_Weights.DEFAULT, num_classes=num_classes, num_backbones=1).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 

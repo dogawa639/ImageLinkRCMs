@@ -193,7 +193,7 @@ class GNNDis(nn.Module):
 class UNetDis(nn.Module):
     # one discriminator for one transportation
     def __init__(self, feature_num, context_num, output_channel,
-                 gamma=0.9, sn=True, dropout=0.0, ext_coeff=1.0):
+                 gamma=0.9, sn=True, dropout=0.0, ext_coeff=1.0, depth=2):
         super().__init__()
         # state : (bs, feature_num, 2d+1, 2d+1)
         # context : (bs, context_num, 2d+1, 2d+1)
@@ -204,9 +204,9 @@ class UNetDis(nn.Module):
         self.gamma = gamma
         self.ext_coeff = ext_coeff
 
-        self.util = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=3)
-        self.ext = UNet(self.total_feature + output_channel * 2, 1, sn=True, dropout=dropout, depth=3)  # state + other agent's (position + pi)
-        self.val = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=3)
+        self.util = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=depth)
+        self.ext = UNet(self.total_feature + output_channel * 2, 1, sn=True, dropout=dropout, depth=depth)  # state + other agent's (position + pi)
+        self.val = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=depth)
 
     def forward(self, input, positions, pis):
         # input: (bs, total_feature, 2d+1, 2d+1)

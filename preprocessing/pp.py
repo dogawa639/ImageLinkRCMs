@@ -322,8 +322,19 @@ class PP:
                                 path[prev_k:k] = lid
                         passed_links[lid] = k
 
+                    path = [path[i] for i in range(len(path) - 1) if path[i] != path[i + 1]] + (
+                        [path[-1]] if ((len(path) > 1 and path[-1] != path[-2]) or len(path) <= 1) else [])
                     if len(path) > 1:
-                        tmp_result = [[seq, path[i], path[i+1], path[-1], tid, uid, mode, purpose] for i in range(len(path)-1) if path[i] != path[i+1]]
+                        path_no_u_turn = [path[0]]
+                        for i in range(1, len(path)):
+                            if len(path_no_u_turn) == 0:
+                                path_no_u_turn.append(path[i])
+                            elif nw_data.edges[path_no_u_turn[-1]].undir_id == nw_data.edges[path[i]].undir_id:  # the pair of U-turn link
+                                path_no_u_turn.pop(-1)
+                            else:
+                                path_no_u_turn.append(path[i])
+
+                        tmp_result = [[seq, path[i], path[i+1], path[-1], tid, uid, mode, purpose] for i in range(len(path)-1)]   # the pair of the upstream and downstream
                         if len(tmp_result) > 0:
                             result.extend(tmp_result)
                             seq += 1

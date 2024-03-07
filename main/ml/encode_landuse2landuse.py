@@ -34,7 +34,7 @@ if __name__ == "__main__":
     model_dir = read_save["model_dir"]
     log_dir = read_save["log_dir"]
 
-    TRINING = False
+    TRINING = True
     TESTING = True
     EARLY_STOP = True
     SAVE_MODEL = True
@@ -143,7 +143,7 @@ if __name__ == "__main__":
                     stop_count = 0
                 else:
                     stop_count += 1
-                if epoch > 20 and stop_count >= 10:
+                if epoch > 50 and stop_count >= 10:
                     print("Early Stopping.")
                     break
             t2 = time.perf_counter()

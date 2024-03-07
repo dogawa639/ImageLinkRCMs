@@ -30,7 +30,8 @@ if __name__ == "__main__":
     link_path = read_data["link_path"]
     link_prop_path = read_data["link_prop_path"]
 
-    pp_path = json.loads(read_data["pp_path"])  # list(str)
+    pp_path = json.loads(read_data["pp_path_train"])  # list(str)
+    pp_path_test = json.loads(read_data["pp_path_test"])  # list(str)tmp
     image_data_dir = read_data["satellite_image_datadir"]  # str or None
     image_data_path = read_data["image_data_path"] # str or None
     image_data_path = None if image_data_path == "null" else image_data_path
@@ -76,13 +77,17 @@ if __name__ == "__main__":
     image_file = os.path.join(fig_dir, "train.png")
     result_dir = read_save["result_dir"]
 
-    MICRO =False
-    MACRO = True
+    MICROSTAT =False
+    MULTI = True
+    MICRO = True
+    MACRO = False
 
-    TRAIN = True
-    TEST = True
+    TRAIN_MICRO = False
+    TEST_MICRO = True
+    TRAIN_MACRO = True
+    TEST_MACRO = True
 
-    if MICRO:
+    if MICROSTAT:
         # instance creation
         traj_path = [os.path.join(traj_dir, "220928", "4", "trajectory_train_0.csv"),
                      os.path.join(traj_dir, "220928", "4", "trajectory_train_2.csv")]
@@ -142,7 +147,7 @@ if __name__ == "__main__":
 
         print(airl.sample_given_v(0, 0))
 
-    if MACRO:
+    if MULTI:
         # instance creation
         use_index = (model_type == "cnn")
         use_encoder = (image_data_path is not None)
@@ -153,21 +158,26 @@ if __name__ == "__main__":
         else:
             nw_data = NetworkGNN(50, node_path, link_path, link_prop_path=link_prop_path)
         pp_list = [PP(ppath, nw_data) for ppath in pp_path]
+
         if model_type == "cnn":
             datasets = [GridDataset(pp, h_dim=h_dim) for pp in pp_list]
+            datasets_test = [GridDataset(PP(ppath, nw_data), h_dim=h_dim) for ppath in pp_path_test]
         else:
             datasets = [PPEmbedDataset(pp, h_dim=h_dim) for pp in pp_list]
-        image_data_list = [os.path.join(image_data_dir, "satellite_image_processed.json"),
-                           os.path.join(onehot_data_dir, "onehot_image_processed.json")]
-        image_data_list = [LinkImageData(image_data, nw_data) for image_data in image_data_list]
-        image_data = CompressedImageData(image_data_list)
+            datasets_test = [PPEmbedDataset(PP(ppath, nw_data), h_dim=h_dim) for ppath in pp_path_test]
+
+        #image_data_list = [os.path.join(image_data_dir, "satellite_image_processed.json"),
+        #                   os.path.join(onehot_data_dir, "onehot_image_processed.json")]
+        #image_data_list = [LinkImageData(image_data, nw_data) for image_data in image_data_list]
+        #image_data = CompressedImageData(image_data_list)
+        image_data = None
 
         # instance creation
-        traj_path = [os.path.join(traj_dir, "220928", "4", "trajectory_train_0.csv"),
-                     os.path.join(traj_dir, "220928", "4", "trajectory_train_2.csv")]
+        traj_path = [os.path.join(traj_dir, "220928", "4", "trajectory_0_1sec_train.csv"),
+                     os.path.join(traj_dir, "220928", "4", "trajectory_2_1sec_train.csv")]
 
-        traj_path_test = [os.path.join(traj_dir, "220928", "4", "trajectory_test_0.csv"),
-                          os.path.join(traj_dir, "220928", "4", "trajectory_test_2.csv")]
+        traj_path_test = [os.path.join(traj_dir, "220928", "4", "trajectory_0_1sec_test.csv"),
+                          os.path.join(traj_dir, "220928", "4", "trajectory_2_1sec_test.csv")]
 
         for i in range(len(traj_path)):
             traj = pd.read_csv(traj_path[i])
@@ -185,7 +195,7 @@ if __name__ == "__main__":
 
         output_channel = len(traj_path)
         mesh_traj = MeshTraj(traj_path, mnw_data)
-        dataset = MeshDataset(mesh_traj, mesh_dist)
+        dataset_mesh = MeshDataset(mesh_traj, mesh_dist)
 
         # model_names : [str] [discriminator, generator]
         model_names = ["UNetDis", "UNetGen"]
@@ -206,8 +216,18 @@ if __name__ == "__main__":
             discriminators.append(discriminator)
 
 
-        micro_airl = MicroAIRL(1.0, generators, discriminators, dataset, model_dir,
+        micro_airl = MicroAIRL(1.0, generators, discriminators, dataset_mesh, model_dir,
                          hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, device=device)
+        if MICRO:
+            if TRAIN_MICRO:
+                micro_airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, max_train_num=10,
+                                  d_epoch=d_epoch, image_file=image_file)
+
+            if TEST_MICRO:
+                mesh_traj = MeshTraj(traj_path_test, mnw_data)
+                dataset = MeshDataset(mesh_traj, mesh_dist)
+                micro_airl.load()
+                micro_airl.test_models(CONFIG, dataset)
         micro_airl.load()
 
         # model_names : [str] [discriminator, generator, (f0, w_encoder), (encoder)]
@@ -259,14 +279,13 @@ if __name__ == "__main__":
         airl = MesoAIRL(micro_airl, generator, discriminator, use_index, datasets, model_dir, image_data=image_data, encoder=encoder,
                     h_dim=h_dim, emb_dim=emb_dim, f0=f0,
                     hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, patch_size=patch_size, device=device)
+        if MACRO:
+            if TRAIN_MACRO:
+                airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, max_train_num=10,
+                              d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
 
-        if TRAIN:
-            airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, max_train_num=10,
-                          d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
+            if TEST_MACRO:
+                airl.load()
+                airl.test(datasets_test)
 
-        if TEST:
-            mesh_traj = MeshTraj(traj_path_test, mnw_data)
-            dataset = MeshDataset(mesh_traj, mesh_dist)
-            airl.locd()
-            airl.test(dataset)
 
