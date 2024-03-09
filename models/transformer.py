@@ -47,7 +47,7 @@ class MultiHeadAttention(nn.Module):
         source_channel = k.shape[-2]
         if source_channel != v.shape[-2]:
             raise Exception("source_channel and value_channel should be the same")
-        atten_agg = None
+        atten_agg = None  # (*, input_channel, source_channel)
         h_tmp = None
         for i in range(self.num_head):
             in_q = self.q_dense[i](q)  # (*, input_channel, in_emb_dim)

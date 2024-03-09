@@ -28,23 +28,14 @@ if __name__ == "__main__":
     image_data_path = None if image_data_path == "null" else image_data_path
 
     # model setting
-    read_model = config["MODELSETTING"]
-    use_f0 = bool(read_model["use_f0"])  # bool
-    emb_dim = int(read_model["emb_dim"])  # int
-    in_emb_dim = json.loads(read_model["in_emb_dim"])  # int or None
-    drop_out = float(read_model["drop_out"])  # float
-    sn = bool(read_model["sn"])  # bool
-    sln = bool(read_model["sln"])  # bool
-    h_dim = int(read_model["h_dim"])  # int
-    w_dim = int(read_model["w_dim"])  # int
-    num_head = int(read_model["num_head"])  # int
-    depth = int(read_model["depth"])  # int
-    gamma = float(read_model["gamma"])  # float
-    max_num = int(read_model["max_num"])  # int
-    ext_coeff = float(read_model["ext_coeff"])  # float
-    hinge_loss = bool(read_model["hinge_loss"])  # bool
-    hinge_thresh = json.loads(read_model["hinge_thresh"])  # float or None
-    patch_size = int(read_model["patch_size"])  # int
+    read_model_general = config["MODELGENERAL"]
+    use_f0 = bool(read_model_general["use_f0"])  # bool
+    h_dim = int(read_model_general["h_dim"])  # int
+    w_dim = int(read_model_general["w_dim"])  # int
+
+    # encoder setting
+    read_model_enc = config["ENCODER"]
+    model_type_enc = read_model_enc["model_type"]  # cnn or vit
 
     # instance creation
     use_index = (model_type == "cnn")
@@ -71,45 +62,65 @@ if __name__ == "__main__":
         model_names += ["FNW"]
         model_names += ["CNNWEnc"] if model_type == "cnn" else ["GNNWEnc"]
     if use_encoder:
-        model_names += ["CNNEnc"]
-
-    kwargs = {
-        "nw_data": nw_data,
-        "output_channel": output_channel,
-        "emb_dim": emb_dim,
-        "in_emb_dim": in_emb_dim,
-        "drop_out": drop_out,
-        "sn": sn,
-        "sln": sln,
-        "h_dim": h_dim,
-        "w_dim": w_dim,
-        "num_head": num_head,
-        "depth": depth,
-        "gamma": gamma,
-        "max_num": max_num,
-        "ext_coeff": ext_coeff,
-        "patch_size": patch_size,
-        "num_source": num_source
-    }
+        if model_type_enc == "cnn":
+            model_names += ["CNNEnc"]
+        elif model_type_enc == "vit":
+            model_names += ["ViTEnc"]
 
     if not use_f0 and not use_encoder:
-        discriminator, generator = get_models(model_names, **kwargs)
+        discriminator, generator = get_models(model_names, nw_data=nw_data, output_channel=output_channel, config=config)
         f0 = None
         w_encoder = None
         encoder = None
     elif use_f0 and not use_encoder:
-        discriminator, generator, f0, w_encoder = get_models(model_names, **kwargs)
+        discriminator, generator, f0, w_encoder = get_models(model_names, nw_data=nw_data, output_channel=output_channel, config=config)
         encoder = None
     elif not use_f0 and use_encoder:
-        discriminator, generator, encoder = get_models(model_names, **kwargs)
+        discriminator, generator, encoder = get_models(model_names, nw_data=nw_data, output_channel=output_channel, config=config)
         f0 = None
         w_encoder = None
     else:
-        discriminator, generator, f0, w_encoder, encoder = get_models(model_names, **kwargs)
+        discriminator, generator, f0, w_encoder, encoder = get_models(model_names, nw_data=nw_data, output_channel=output_channel, config=config)
+
+        # discriminator setting
+        read_model_dis = config["DISCRIMINATOR"]
+        emb_dim_dis = int(read_model_dis["emb_dim"])  # int
+        enc_dim_dis = int(read_model_dis["enc_dim"])  # int
+        in_emb_dim_dis = json.loads(read_model_dis["in_emb_dim"])  # int or None
+        num_head_dis = int(read_model_dis["num_head"])  # int
+        depth_dis = int(read_model_dis["depth"])  # int
+        dropout_dis = float(read_model_dis["dropout"])  # float
+
+        # generator setting
+        read_model_gen = config["GENERATOR"]
+        emb_dim_gen = int(read_model_gen["emb_dim"])  # int
+        enc_dim_gen = int(read_model_gen["enc_dim"])  # int
+        in_emb_dim_gen = json.loads(read_model_gen["in_emb_dim"])  # int or None
+        num_head_gen = int(read_model_gen["num_head"])  # int
+        depth_gen = int(read_model_gen["depth"])  # int
+        sn_gen = True if read_model_gen["sn"] == "true" else False  # bool
+        dropout_gen = float(read_model_gen["dropout"])  # float
+        max_num_gen = int(read_model_gen["max_num"])  # int
+
+        # encoder setting
+        read_model_enc = config["ENCODER"]
+        patch_size_enc = int(read_model_enc["patch_size"])  # int
+        vit_patch_size_enc = json.loads(read_model_enc["vit_patch_size"])  # int
+        mid_dim_enc = int(read_model_enc["mid_dim"])  # int
+        emb_dim_enc = int(read_model_enc["emb_dim"])  # int
+        num_source_enc = int(read_model_enc["num_source"])  # int
+        num_head_enc = int(read_model_enc["num_head"])  # int
+        depth_enc = int(read_model_enc["depth"])  # int
+        dropout_enc = float(read_model_enc["dropout"])  # float
+        output_atten_enc = True if read_model_enc["output_atten"] == "true" else False  # bool
+
+        # w_encoder setting
+        read_model_wenc = config["WENCODER"]
+        emb_dim_wenc = int(read_model_wenc["emb_dim"])  # int
 
     print(model_type)
     if model_type == "cnn":
-        total_feature_num = nw_data.feature_num + nw_data.context_feature_num
+        total_feature_num = nw_data.feature_num + nw_data.context_feature_num + emb_dim_enc
         input_size = (10, total_feature_num, 3, 3)
         input_size2 = (10, 2, 3, 3)
         print("---Discriminator---")
@@ -126,8 +137,9 @@ if __name__ == "__main__":
             print("---Encoder---")
             print(summary(model=encoder, input_size=[(10, 1000), (10, w_dim)]))
     elif model_type == "gnn":
-        input_size = (5, nw_data.link_num, nw_data.feature_num)
-        input_size2 = (5, nw_data.link_num, nw_data.link_num, 2)
+        total_feature_num = nw_data.feature_num + nw_data.context_feature_num + emb_dim_enc
+        input_size = (5, nw_data.link_num, total_feature_num)
+        input_size2 = (5, 2, nw_data.link_num, nw_data.link_num)
         print("---Discriminator---")
         print(summary(model=discriminator, input_size=[input_size, input_size2, (5, w_dim)]))
         print("---Generator---")
@@ -137,10 +149,11 @@ if __name__ == "__main__":
             print(summary(model=f0, input_size=(5, h_dim)))
         if w_encoder is not None:
             print("---W_encoder---")
+            input_size = (5, nw_data.link_num, nw_data.feature_num)
             print(summary(model=w_encoder, input_size=[input_size, (5, nw_data.link_num, nw_data.link_num)]))
         if encoder is not None:
             print("---Encoder---")
-            print(summary(model=encoder, input_size=[(5, 1000), (5, w_dim)]))
+            print(summary(model=encoder, input_size=[(5, mid_dim_enc), (5, w_dim)]))
 
 
 

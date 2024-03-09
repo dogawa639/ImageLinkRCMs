@@ -12,14 +12,16 @@ __all__ = ["ViT"]
 
 
 class ViT(nn.Module):
-    def __init__(self, img_size, patch_size, num_classes, dim, depth, heads, dropout=0.0, pool='cls'):
+    def __init__(self, img_size, patch_size, num_classes, dim, depth, heads, dropout=0.0, pool='cls', output_atten=False):
         super().__init__()
         img_height, img_width, channels = img_size
         patch_height, patch_width = patch_size
 
         if img_height % patch_height != 0 or img_width % patch_height != 0:
             raise ValueError("Image size must be divided by patch size.")
+
         self.pool = pool
+        self.output_atten = output_atten
 
         patch_dim = channels * patch_height * patch_width
         self.split_height = img_height // patch_height
@@ -36,27 +38,34 @@ class ViT(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(dropout)
 
-        self.transformer = TransformerEncoder(dim, num_head=heads, dropout=dropout, depth=depth, pre_norm=True)
+        self.transformer = TransformerEncoder(dim, num_head=heads, dropout=dropout, depth=depth, pre_norm=True, output_atten=True)
         self.mlp_head = FF(dim, num_classes)
 
     def forward(self, img):
         # img: (bs, c, h, w)->(h, w, bs, c)
-        img = torch.permute(img, (0, 2, 3, 1))
+        img = torch.permute(img, (2, 3, 0, 1))
         # (h, w, bs, c) -> (bs, num_patches, patch_dim)
-        patches = []
-        patches = tensor([patches.extend(np.hsplit(h_img, self.split_width) for h_img in np.vsplit(img, self.split_height))])  # shape(split_height, split_width, h', w', bs, c)
+        patches = tensor(np.array([np.hsplit(h_img, self.split_width) for h_img in np.vsplit(img, self.split_height)]), device=img.device)  # shape(split_height, split_width, h', w', bs, c)
         patches = torch.permute(patches, (4, 0, 1, 5, 2, 3))  # shape(bs, split_height, split_width, c, h', w')
-        patches = patches.view(patches.shape[0], self.split_height * self.split_width, -1)
+        patches = patches.reshape(patches.shape[0], self.split_height * self.split_width, -1)
 
         bs, n, _ = patches.shape
-        cls_token = self.cls_token.repeat(bs, n, 1)  # (1, 1, dim)->(bs, n, dim)
+        cls_token = self.cls_token.repeat(bs, 1, 1)  # (1, 1, dim)->(bs, n, dim)
 
-        x = torch.cat((cls_token, patches), dim=1)
+        x = self.to_patch_embedding(patches)
+        x = torch.cat((cls_token, x), dim=1)
         x = x + self.pos_embedding
         x = self.dropout(x)
 
-        x = self.transformer(x)
-        x = x[:, 0] if self.pool == "cls" else x.mean(dim=1)
-        return self.mlp_head(x)  # (bs, num_patches, num_classes)
+        x, atten = self.transformer(x, None)  # x: (bs, 1+num_patches, dim), atten: [(bs, 1+num_patches, 1+num_patches)]
+        if self.pool == "cls":
+            x = x[:, 0]
+            atten = tensor(np.mean([tmp[:, 0, 1:] for tmp in atten], axis=0), device=img.device)  # (bs, num_patches)
+        else:
+            x = x.mean(dim=1)
+            atten = tensor(np.mean([np.mean(tmp[:, 1:, 1:], axis=1) for tmp in atten], axis=0), device=img.device)
+        if self.output_atten:
+            return self.mlp_head(x), atten  # (bs, num_classes), (bs, num_patches)
+        return self.mlp_head(x)  # (bs, num_classes)
 
 

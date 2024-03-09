@@ -19,7 +19,7 @@ if __name__ == "__main__":
     save_data = config["SAVE"]
     debug_dir = save_data["debug_dir"]
 
-    MAPMATCHING = False
+    MAPMATCHING = True
     PLOT = True
 
     #nw_data = NetworkCNN(node_path, link_path, link_prop_path=link_prop_path, mode="ped")

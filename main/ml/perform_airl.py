@@ -46,7 +46,27 @@ if __name__ == "__main__":
     shuffle = bool(read_train["shuffle"])  # bool
     train_ratio = float(read_train["train_ratio"])  # float
     d_epoch = int(read_train["d_epoch"])  # int
+
     # model setting
+    read_model_general = config["MODELGENERAL"]
+    use_f0 = True if read_model_general["use_f0"] == "true" else False  # bool
+    gamma = float(read_model_general["gamma"])  # float
+    ext_coeff = float(read_model_general["ext_coeff"])  # float
+    hinge_loss = bool(read_model_general["hinge_loss"])  # bool
+    hinge_thresh = json.loads(read_model_general["hinge_thresh"])  # float or None
+    sln = False  # bool(read_model_general["sln"])  # bool
+    h_dim = int(read_model_general["h_dim"])  # int
+    w_dim = int(read_model_general["w_dim"])  # int
+
+    # discriminator setting
+    read_model_dis = config["DISCRIMINATOR"]
+    emb_dim = int(read_model_dis["emb_dim"])  # int
+    enc_dim = int(read_model_dis["enc_dim"])  # int
+    in_emb_dim = json.loads(read_model_dis["in_emb_dim"])  # int or None
+    num_head_dis = int(read_model_dis["num_head"])  # int
+    depth_dis = int(read_model_dis["depth"])  # int
+
+
     read_model = config["MODELSETTING"]
     use_f0 = True if read_model["use_f0"] == "true" else False  # bool
     emb_dim = int(read_model["emb_dim"])  # int
@@ -65,6 +85,7 @@ if __name__ == "__main__":
     hinge_loss = bool(read_model["hinge_loss"])  # bool
     hinge_thresh = json.loads(read_model["hinge_thresh"])  # float or None
     patch_size = int(read_model["patch_size"])  # int
+
     # save setting
     read_save = config["SAVE"]
     model_dir = read_save["model_dir"]
@@ -100,6 +121,7 @@ if __name__ == "__main__":
         image_data_list = [LinkImageData(image_data, nw_data) for image_data in image_data_list]
         image_data = CompressedImageData(image_data_list)
 
+
     # model_names : [str] [discriminator, generator, (f0, w_encoder), (encoder)]
     model_names = ["CNNDis", "CNNGen"] if model_type == "cnn" else ["GNNDis", "GNNGen"]
     if use_f0:
@@ -108,40 +130,20 @@ if __name__ == "__main__":
     if use_encoder:
         model_names += ["CNNEnc"]
 
-    kwargs = {
-        "nw_data": nw_data,
-        "output_channel": output_channel,
-        "emb_dim": emb_dim,
-        "enc_dim": enc_dim,
-        "in_emb_dim": in_emb_dim,
-        "drop_out": drop_out,
-        "sn": sn,
-        "sln": sln,
-        "h_dim": h_dim,
-        "w_dim": w_dim,
-        "num_head": num_head,
-        "depth": depth,
-        "gamma": gamma,
-        "max_num": max_num,
-        "ext_coeff": ext_coeff,
-        "patch_size": patch_size,
-        "num_source": 1
-    }
-
     if not use_f0 and not use_encoder:
-        discriminator, generator = get_models(model_names, **kwargs)
+        discriminator, generator = get_models(model_names, nw_data=nw_data, output_channel=output_channel, config=config)
         f0 = None
         w_encoder = None
         encoder = None
     elif use_f0 and not use_encoder:
-        discriminator, generator, f0, w_encoder = get_models(model_names, **kwargs)
+        discriminator, generator, f0, w_encoder = get_models(model_names, nw_data=nw_data, output_channel=output_channel, config=config)
         encoder = None
     elif not use_f0 and use_encoder:
-        discriminator, generator, encoder = get_models(model_names, **kwargs)
+        discriminator, generator, encoder = get_models(model_names, nw_data=nw_data, output_channel=output_channel, config=config)
         f0 = None
         w_encoder = None
     else:
-        discriminator, generator, f0, w_encoder, encoder = get_models(model_names, **kwargs)
+        discriminator, generator, f0, w_encoder, encoder = get_models(model_names, nw_data=nw_data, output_channel=output_channel, config=config)
 
     #image_data = None
     #encoder = None
