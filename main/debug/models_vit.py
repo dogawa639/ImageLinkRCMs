@@ -22,7 +22,7 @@ if __name__ == "__main__":
     print(y.shape)
     print(y.min(), y.max())
 
-    atten = atten[0].reshape(model.split_height, model.split_width).detach().cpu().numpy()
+    atten = atten[0].detach().cpu().numpy()
 
     plt.imshow(atten)
     plt.show()

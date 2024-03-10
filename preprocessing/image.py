@@ -89,6 +89,22 @@ class LinkImageData:
                 print(f"No data dir is set for {data}.")
         return images
 
+    def load_link_image(self, idx):
+        # idx: int
+        # img: npy
+        # return list of imgs(None or tensor)
+        imgs = []
+        for data in self.data_list:
+            if "data_dir" in data:
+                path = os.path.join(data["data_dir"], f"{self.lids[idx]}.png")
+                if os.path.exists(path):
+                    image = self.image_dataset_base.preprocess(Image.open(path))
+                    image = image.unsqueeze(0)  # (1, c, h, w)
+                    imgs.append(image)
+                else:
+                    imgs.append(None)
+        return imgs
+
     def load_compressed(self, idx):
         # idx: int
         # compressed: npy

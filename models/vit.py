@@ -65,7 +65,7 @@ class ViT(nn.Module):
             x = x.mean(dim=1)
             atten = tensor(np.mean([np.mean(tmp[:, 1:, 1:], axis=1) for tmp in atten], axis=0), device=img.device)
         if self.output_atten:
-            return self.mlp_head(x), atten  # (bs, num_classes), (bs, num_patches)
+            return self.mlp_head(x), atten.view(atten.shape[0], self.split_height, self.split_width)  # (bs, num_classes), (bs, self.split_height, self.split_width)
         return self.mlp_head(x)  # (bs, num_classes)
 
 
