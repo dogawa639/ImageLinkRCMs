@@ -13,7 +13,7 @@ if __name__ == "__main__":
     from preprocessing.dataset import *
     from learning.airl import *
 
-    CONFIG = "../../config/config_airl_cnn.ini"
+    CONFIG = "../../config/config_airl_test.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
     # general
@@ -58,33 +58,19 @@ if __name__ == "__main__":
     h_dim = int(read_model_general["h_dim"])  # int
     w_dim = int(read_model_general["w_dim"])  # int
 
-    # discriminator setting
-    read_model_dis = config["DISCRIMINATOR"]
-    emb_dim = int(read_model_dis["emb_dim"])  # int
-    enc_dim = int(read_model_dis["enc_dim"])  # int
-    in_emb_dim = json.loads(read_model_dis["in_emb_dim"])  # int or None
-    num_head_dis = int(read_model_dis["num_head"])  # int
-    depth_dis = int(read_model_dis["depth"])  # int
 
+    # encoder setting
+    read_model_enc = config["ENCODER"]
+    patch_size_enc = int(read_model_enc["patch_size"])  # int
+    vit_patch_size_enc = json.loads(read_model_enc["vit_patch_size"])  # int
+    mid_dim_enc = int(read_model_enc["mid_dim"])  # int
+    emb_dim_enc = int(read_model_enc["emb_dim"])  # int
+    num_source_enc = int(read_model_enc["num_source"])  # int
+    num_head_enc = int(read_model_enc["num_head"])  # int
+    depth_enc = int(read_model_enc["depth"])  # int
+    dropout_enc = float(read_model_enc["dropout"])  # float
+    output_atten_enc = True if read_model_enc["output_atten"] == "true" else False  # bool
 
-    read_model = config["MODELSETTING"]
-    use_f0 = True if read_model["use_f0"] == "true" else False  # bool
-    emb_dim = int(read_model["emb_dim"])  # int
-    enc_dim = int(read_model["enc_dim"])  # int
-    in_emb_dim = json.loads(read_model["in_emb_dim"])  # int or None
-    drop_out = float(read_model["drop_out"])  # float
-    sn = True if read_model["sn"] == "true" else False   # bool
-    sln = False#bool(read_model["sln"])  # bool
-    h_dim = int(read_model["h_dim"])  # int
-    w_dim = int(read_model["w_dim"])  # int
-    num_head = int(read_model["num_head"])  # int
-    depth = int(read_model["depth"])  # int
-    gamma = float(read_model["gamma"])   # float
-    max_num = int(read_model["max_num"])  # int
-    ext_coeff = float(read_model["ext_coeff"])  # float
-    hinge_loss = bool(read_model["hinge_loss"])  # bool
-    hinge_thresh = json.loads(read_model["hinge_thresh"])  # float or None
-    patch_size = int(read_model["patch_size"])  # int
 
     # save setting
     read_save = config["SAVE"]
@@ -149,8 +135,8 @@ if __name__ == "__main__":
     #encoder = None
     ratio = (0.8, 0.2)
 
-    airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=image_data, encoder=encoder, h_dim=h_dim, emb_dim=emb_dim, f0=f0,
-                 hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, patch_size=patch_size, device=device)
+    airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=image_data, encoder=encoder, h_dim=h_dim, f0=f0,
+                 hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, device=device)
 
     if TRAIN:
         airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, ratio=ratio, max_train_num=10, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)

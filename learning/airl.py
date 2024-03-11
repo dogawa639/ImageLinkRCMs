@@ -24,7 +24,7 @@ __all__ = ["AIRL"]
 
 class AIRL:
     def __init__(self, generator, discriminator, use_index, datasets, model_dir, image_data=None, encoder=None, h_dim=10, emb_dim=10, f0=None,
-                 hinge_loss=False, hinge_thresh=0.6, patch_size=256, use_compressed_image=True, device="cpu"):
+                 hinge_loss=False, hinge_thresh=0.6, patch_size=256, device="cpu"):
         if hinge_thresh > 1.0 or hinge_thresh < 0.0:
             raise ValueError("hinge_thresh must be in [0, 1].")
         if encoder is not None and image_data is None:
@@ -41,11 +41,10 @@ class AIRL:
         self.emb_dim = emb_dim
         self.f0 = f0  # h->w
         self.use_w = f0 is not None
-        self.image_data = image_data  # CompressedImageData if use_compressed_image else LinkImageData
+        self.image_data = image_data
         self.hinge_loss = hinge_loss
         self.hinge_thresh = -log(tensor(hinge_thresh, dtype=torch.float32, device=device, requires_grad=False))
         self.patch_size = patch_size
-        self.use_compressed_image = use_compressed_image
         self.device = device
 
         self.sln = self.use_w
@@ -55,8 +54,7 @@ class AIRL:
 
         if self.use_encoder:
             self.encoder = self.encoder.to(device)
-            if self.use_compressed_image:
-                self._load_image_feature()  # self.comp_feature: (link_num, comp_dim)
+            self._load_image_feature()  # self.comp_feature: (link_num, comp_dim)
         if self.use_w:
             self.f0 = self.f0.to(device)
     
@@ -468,11 +466,7 @@ class AIRL:
     def cat_image_feature(self, batch, w=None):
         # w: (bs, w_dim)
         # index: (bs, 9)
-        if self.use_compressed_image: # 2 step compression
-            image_feature = self.encoder(self.comp_feature, w=w)  # (bs, link_num, emb_dim)
-        else:  # single step compression
-            self._load_and_compress_image()
-            image_feature = self.encoder(self.comp_feature, w=w)  # (bs, link_num, emb_dim)
+        image_feature = self.encoder(self.comp_feature, w=w)  # (bs, link_num, emb_dim)
 
         # inputs: (bs, c, 3, 3) or (bs, link_num, feature_num). c or feature_num are total_feature_num + emb_dim
         if self.use_index:
@@ -543,7 +537,6 @@ class AIRL:
         self.discriminator.load(self.model_dir)
 
     def _load_image_feature(self):
-        # load compressed image feature and store in self.comp_feature
         comp_feature = None
         comp_dim = None
         for i in range(len(self.image_data)):
@@ -562,30 +555,4 @@ class AIRL:
         else:
             self.comp_feature = tensor(comp_feature, dtype=torch.float32, device=self.device)
 
-    def _load_and_compress_image(self):
-        # only when use_compressed_image is False
-        # image_data: LinkImageData
-        comp_feature = None
-        comp_dim = None
-        for i in range(len(self.image_data.lids)):
-            images = self.image_data.load_link_image(i)
-            tmp_feature = None
-            for img in images:
-                if tmp_feature is None:
-                    tmp_feature = self.encoder.compress(img)
-                else:
-                    tmp_feature = tmp_feature + self.encoder(img)
-            if tmp_feature is not None:
-                tmp_feature = np.expand_dims(tmp_feature, 0)
-                comp_dim = tmp_feature.shape[-1]
-                if comp_feature is None:
-                    comp_feature = np.zeros((i, comp_dim), dtype=np.float32)
-            elif comp_dim is not None:
-                tmp_feature = np.zeros((1, comp_dim), dtype=np.float32)
-            if tmp_feature is not None:
-                comp_feature = np.concatenate((comp_feature, tmp_feature), axis=0)
-        if comp_feature is None:
-            print("No image feature is loaded.")
-        else:
-            self.comp_feature = tensor(comp_feature, dtype=torch.float32, device=self.device)
 
