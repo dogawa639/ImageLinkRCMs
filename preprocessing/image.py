@@ -59,6 +59,16 @@ class CompressedImageData:
                 compressed = np.concatenate((compressed, compressed_tmp), axis=0)
         return compressed
 
+    def load_link_image(self, idx):
+        # idx: int
+        # img: tensore()
+        # return list((n, c, h, w))
+        imgs = []
+        for link_image_data in self.link_image_data_list:
+            imgs_tmp = link_image_data.load_link_image(idx)  # tensor(n, c, h, w)
+            imgs.append(imgs_tmp)
+        return imgs
+
 
 class LinkImageData:
     # load link images from data_dir
@@ -94,16 +104,24 @@ class LinkImageData:
         # img: npy
         # return list of imgs(None or tensor)
         imgs = []
+        shape = None
         for data in self.data_list:
             if "data_dir" in data:
                 path = os.path.join(data["data_dir"], f"{self.lids[idx]}.png")
                 if os.path.exists(path):
-                    image = self.image_dataset_base.preprocess(Image.open(path))
-                    image = image.unsqueeze(0)  # (1, c, h, w)
+                    image = self.image_dataset_base.preprocess(Image.open(path)) # (c, h, w)
                     imgs.append(image)
+                    shape = image.shape
                 else:
                     imgs.append(None)
-        return imgs
+        if shape is None:
+            res = None
+        else:
+            res = torch.zeros((len(imgs), *shape), dtype=torch.float32, requires_grad=False)
+            for i, img in enumerate(imgs):
+                if img is not None:
+                    res[i] = img
+        return res
 
     def load_compressed(self, idx):
         # idx: int

@@ -8,7 +8,7 @@ if __name__ == "__main__":
     from models.deeplabv3 import resnet50, ResNet50_Weights
     from utility import *
 
-    CONFIG = "../../config/config_all.ini"
+    CONFIG = "../../config/config_airl_all.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
 

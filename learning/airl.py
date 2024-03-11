@@ -102,7 +102,7 @@ class AIRL:
                     # raw_data requires_grad=True
                     # Grid: (sum(links), 3, 3) corresponds to next_links
                     # Emb: (trip_num, link_num, link_num) sparse, corresponds to transition_matrix
-                    batch_real = [tensor(tmp.to_dense(), dtype=torch.float32, device=self.device) for tmp in batch_real]
+                    batch_real = [tmp.to_dense().clone().detach().to(device=self.device) for tmp in batch_real]
                     bs = batch_real[0].shape[0]
                     w = None
                     if self.use_w:
@@ -168,7 +168,7 @@ class AIRL:
                 tn = 0.0
                 fn = 0.0
                 for batch_real in dataloader_val:
-                    batch_real = [tensor(tmp.to_dense(), dtype=torch.float32, device=self.device) for tmp in batch_real]
+                    batch_real = [tmp.to_dense().clone().detach().to(device=self.device) for tmp in batch_real]
                     w = None
                     if self.use_w:
                         w = self.f0(batch_real[-1])  # (bs, w_dim)
@@ -261,7 +261,7 @@ class AIRL:
             mode_loss_g_test = []
             mode_loss_d_test = []
             for batch_real in dataloader_test:
-                batch_real = [tensor(tmp.to_dense(), dtype=torch.float32, device=self.device) for tmp in batch_real]
+                batch_real = [tmp.to_dense().clone().detach().to(self.device) for tmp in batch_real]
                 w = None
                 if self.use_w:
                     w = self.f0(batch_real[-1])  # (bs, w_dim)
@@ -319,7 +319,7 @@ class AIRL:
             for batch_real in dataloader_test:
                 # Grid: (sum(links), 3, 3) corresponds to next_links
                 # Emb: (trip_num, link_num, link_num) sparse, corresponds to transition_matrix
-                batch_real = [tensor(tmp.to_dense(), dtype=torch.float32, device=self.device) for tmp in batch_real]
+                batch_real = [tmp.to_dense().clone().detach().to(device=self.device) for tmp in batch_real]
                 bs = batch_real[0].shape[0]
                 w = None
                 if self.use_w:
@@ -388,6 +388,25 @@ class AIRL:
         self.generator.to(self.device)
         return sv_reshaped
 
+    def show_attention_map(self, idxs):
+        len_imgs = 0
+        fig = plt.figure(figsize=(5, 5 * len(idxs)))
+        for i in idxs:
+            images = self.image_data.load_link_image(i)  # list(tensor(n, c, h, w))
+            tmp_feature = None
+            len_imgs = max(len_imgs, len(images))
+            for num_source, img in enumerate(images):
+                img = img.to(self.device)
+                compressed = self.encoder.compress(img, num_source=num_source)
+                if type(compressed) is not tuple:
+                    print("Attention map is only available for ViT encoder.")
+                    raise NotImplementedError
+                atten = compressed[1].detach().cpu().numpy()
+                ax = fig.add_subplot(len(idxs), len_imgs * 2, (len_imgs * 2) * i + num_source + 1)
+                ax.imshow(img.detach().cpu().numpy().transpose(1, 2, 0))
+                ax = fig.add_subplot(len(idxs), len_imgs * 2, (len_imgs * 2) * i + num_source + 1 + len_imgs)
+                ax.imshow(atten)
+        plt.show()
 
     def loss(self, log_d_g, log_d_d, hinge_loss=False):
         # log_d_g, log_d_d: (log d_for_g, log 1-d_for_g), (log d_for_d, log 1-d_for_d)
@@ -416,15 +435,16 @@ class AIRL:
         else:
             input, mask, next_link, _ = batch
         f_val = self.discriminator(input, pi, i=i, w=w)
-        f_val_masked = f_val * mask
+        f_val_masked = torch.where(mask > 0.99, f_val, torch.zeros_like(f_val))
         f_val_clone_masked = f_val_masked.clone().detach()
-        pi_i_clone = pi.clone().detach()[:, i, :, :]
+        pi = torch.where(mask > 0.99, pi[:, i, :, :], tensor(0.0, dtype=torch.float32, device=pi.device))
+        pi_i_clone = pi.clone().detach()
         # f_val: (bs, oc, *choice_space), pi: (bs, oc, *choice_space)
-        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi[:, i, :, :])) * pi_i_clone
-        log_1_d_g = (log(pi[:, i, :, :]) - log(torch.exp(f_val_clone_masked) + pi[:, i, :, :])) * pi_i_clone
+        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi))  # * pi_i_clone
+        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi))  # * pi_i_clone
 
-        log_d_d = (f_val_masked - log(torch.exp(f_val_masked) + pi_i_clone)) * next_link
-        log_1_d_d = (log(pi_i_clone) - log(torch.exp(f_val_masked) + pi_i_clone)) * pi_i_clone
+        log_d_d = (f_val_masked - log(torch.exp(f_val_masked) + pi_i_clone))  # * next_link
+        log_1_d_d = (log(pi_i_clone) - log(torch.exp(f_val_masked) + pi_i_clone))  # * pi_i_clone
 
         return (log_d_g, log_1_d_g), (log_d_d, log_1_d_d)
 
@@ -464,14 +484,16 @@ class AIRL:
         fn = (next_mask * (1-pred_mask)).sum()
         return ll, tp, fp, tn, fn
 
-    
     def cat_image_feature(self, batch, w=None):
         # w: (bs, w_dim)
         # index: (bs, 9)
         if self.use_compressed_image: # 2 step compression
-            image_feature = self.encoder(self.comp_feature, w=w)  # (bs, link_num, emb_dim)
+            image_feature = self.encoder(self.comp_feature, w=w)  # (bs, link_num, mid_dim) -> (bs, link_num, emb_dim)
         else:  # single step compression
-            self._load_and_compress_image()
+            idx_set = None
+            if self.use_index:
+                idx_set = set(np.unique(batch[3].clone().detach().cpu().numpy()))
+            self._load_and_compress_image(idx_set)  # self.comp_feature: (link_num, emb_dim)
             image_feature = self.encoder(self.comp_feature, w=w)  # (bs, link_num, emb_dim)
 
         # inputs: (bs, c, 3, 3) or (bs, link_num, feature_num). c or feature_num are total_feature_num + emb_dim
@@ -560,32 +582,38 @@ class AIRL:
         if comp_feature is None:
             print("No image feature is loaded.")
         else:
-            self.comp_feature = tensor(comp_feature, dtype=torch.float32, device=self.device)
+            self.comp_feature = tensor(comp_feature, dtype=torch.float32, device=self.device, requires_grad=False)  # (link_num, comp_dim)  comp_dim: mid_dim
 
-    def _load_and_compress_image(self):
+    def _load_and_compress_image(self, idx_set=None):
         # only when use_compressed_image is False
-        # image_data: LinkImageData
+        # image_data: CompressedImageData
         comp_feature = None
         comp_dim = None
         for i in range(len(self.image_data.lids)):
-            images = self.image_data.load_link_image(i)
+            images = self.image_data.load_link_image(i)  # list(tensor(n, c, h, w))
             tmp_feature = None
-            for img in images:
+            for num_source, img in enumerate(images):
+                if idx_set is not None and i not in idx_set:
+                    break
+                img = img.to(self.device)
+                compressed = self.encoder.compress(img, num_source=num_source)
+                if type(compressed) == tuple:
+                    compressed = torch.squeeze(compressed[0], dim=0)
                 if tmp_feature is None:
-                    tmp_feature = self.encoder.compress(img)
+                    tmp_feature = compressed
                 else:
-                    tmp_feature = tmp_feature + self.encoder(img)
+                    tmp_feature = tmp_feature + compressed  # (emb_dim)
             if tmp_feature is not None:
-                tmp_feature = np.expand_dims(tmp_feature, 0)
+                tmp_feature = torch.unsqueeze(tmp_feature, dim=0)
                 comp_dim = tmp_feature.shape[-1]
                 if comp_feature is None:
-                    comp_feature = np.zeros((i, comp_dim), dtype=np.float32)
+                    comp_feature = torch.zeros((i, comp_dim), dtype=torch.float32, device=self.device)
             elif comp_dim is not None:
-                tmp_feature = np.zeros((1, comp_dim), dtype=np.float32)
+                tmp_feature = torch.zeros((1, comp_dim), dtype=torch.float32, device=self.device)
             if tmp_feature is not None:
-                comp_feature = np.concatenate((comp_feature, tmp_feature), axis=0)
+                comp_feature = torch.cat((comp_feature, tmp_feature), dim=0)
         if comp_feature is None:
             print("No image feature is loaded.")
         else:
-            self.comp_feature = tensor(comp_feature, dtype=torch.float32, device=self.device)
+            self.comp_feature = comp_feature  # (link_num, comp_dim)  comp_dim: mid_dim
 

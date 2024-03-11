@@ -8,7 +8,7 @@ if __name__ == "__main__":
 
     device = "cpu"
 
-    img_size = (256, 256, 3)
+    img_size = (3, 256, 256)
     patch_size = (16, 16)
     num_classes = 10
     dim = 256

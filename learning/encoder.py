@@ -25,7 +25,7 @@ class CNNEnc(nn.Module):
         self.w_dim = w_dim
         self.mid_dim = mid_dim
 
-        self.resnet50 = resnet50(weights=ResNet50_Weights.DEFAULT, num_classes=mid_dim)
+        self.resnet50 = nn.ModuleList([resnet50(weights=ResNet50_Weights.DEFAULT, num_classes=mid_dim) for _ in range(num_source)])
 
         self.lin = nn.ModuleList([FF(self.mid_dim, emb_dim, self.mid_dim*2, bias=True) for _ in range(num_source)])
         self.norm0 = nn.LayerNorm(patch_size)
@@ -35,11 +35,6 @@ class CNNEnc(nn.Module):
         else:
             self.norm1 = nn.LayerNorm(self.mid_dim)
             self.norm2 = nn.LayerNorm(emb_dim)
-
-        self.seq = nn.Sequential(
-            self.norm0,
-            self.resnet50  # output: (1, mid_dim)
-        )
 
     def forward(self, x, w=None, source_i=0):
         # x: (bs2, mid_dim) or (mid_dim)
@@ -67,11 +62,11 @@ class CNNEnc(nn.Module):
             x = x.squeeze(0)
         return x
 
-    def compress(self, patch):
+    def compress(self, patch, num_source=1):
         # satellite: (bs2, c, h, width) or (c, h, width)
         if patch.dim() == 3:
             patch = patch.unsqueeze(0)  # (1, c, h, w)
-        x = self.seq(patch)   # (bs2, 1000)
+        x = self.resnet50[num_source](self.norm0(patch))   # (bs2, 1000)
         return x
 
 
@@ -88,7 +83,7 @@ class ViTEnc(nn.Module):
         self.output_atten = output_atten
 
         patch_dim = vit_patch_size[0] * vit_patch_size[1] * patch_size[0]
-        self.vit = ViT(patch_size, vit_patch_size, patch_dim // 2, mid_dim, depth, heads, dropout, output_atten=True)
+        self.vit = nn.ModuleList([ViT(patch_size, vit_patch_size, mid_dim, patch_dim // 2, depth, heads, dropout, output_atten=True) for _ in range(num_source)])
 
         self.lin = nn.ModuleList([FF(self.mid_dim, emb_dim, self.mid_dim*2, bias=True) for _ in range(num_source)])
         self.norm0 = nn.LayerNorm(patch_size)
@@ -99,10 +94,6 @@ class ViTEnc(nn.Module):
             self.norm1 = nn.LayerNorm(self.mid_dim)
             self.norm2 = nn.LayerNorm(emb_dim)
 
-        self.seq = nn.Sequential(
-            self.norm0,
-            self.vit  # output: (1, mid_dim)
-        )
 
     def forward(self, x, w=None, source_i=0):
         # x: (bs2, mid_dim) or (mid_dim)
@@ -130,11 +121,11 @@ class ViTEnc(nn.Module):
             x = x.squeeze(0)
         return x
 
-    def compress(self, patch):
+    def compress(self, patch, num_source=1):
         # satellite: (bs2, c, h, width) or (c, h, width)
         if patch.dim() == 3:
             patch = patch.unsqueeze(0)  # (1, c, h, w)
-        x, atten = self.seq(patch)   # (bs2, mid_dim), (bs2, num_patches)
+        x, atten = self.vit[num_source](self.norm0(patch))  # (bs2, mid_dim), (bs2, num_patches)
         if self.output_atten:
             return x, atten
         return x

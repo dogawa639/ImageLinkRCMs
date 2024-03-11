@@ -14,7 +14,7 @@ __all__ = ["ViT"]
 class ViT(nn.Module):
     def __init__(self, img_size, patch_size, num_classes, dim, depth, heads, dropout=0.0, pool='cls', output_atten=False):
         super().__init__()
-        img_height, img_width, channels = img_size
+        channels, img_height, img_width = img_size
         patch_height, patch_width = patch_size
 
         if img_height % patch_height != 0 or img_width % patch_height != 0:
@@ -45,8 +45,8 @@ class ViT(nn.Module):
         # img: (bs, c, h, w)->(h, w, bs, c)
         img = torch.permute(img, (2, 3, 0, 1))
         # (h, w, bs, c) -> (bs, num_patches, patch_dim)
-        patches = tensor(np.array([np.hsplit(h_img, self.split_width) for h_img in np.vsplit(img, self.split_height)]), device=img.device)  # shape(split_height, split_width, h', w', bs, c)
-        patches = torch.permute(patches, (4, 0, 1, 5, 2, 3))  # shape(bs, split_height, split_width, c, h', w')
+        patches = torch.stack([torch.stack(torch.hsplit(h_img, self.split_width), 0) for h_img in torch.vsplit(img, self.split_height)], 0)  # shape(split_height, split_width, h', w', bs, c)
+        patches = torch.permute(patches, (4, 0, 1, 5, 2, 3))  # shape(split_height, split_width, h', w', bs, c) -> (bs, split_height, split_width, c, h', w')
         patches = patches.reshape(patches.shape[0], self.split_height * self.split_width, -1)
 
         bs, n, _ = patches.shape
@@ -60,10 +60,10 @@ class ViT(nn.Module):
         x, atten = self.transformer(x, None)  # x: (bs, 1+num_patches, dim), atten: [(bs, 1+num_patches, 1+num_patches)]
         if self.pool == "cls":
             x = x[:, 0]
-            atten = tensor(np.mean([tmp[:, 0, 1:] for tmp in atten], axis=0), device=img.device)  # (bs, num_patches)
+            atten = torch.mean(torch.stack([tmp[:, 0, 1:] for tmp in atten], dim=0), dim=0)  # (bs, num_patches)
         else:
             x = x.mean(dim=1)
-            atten = tensor(np.mean([np.mean(tmp[:, 1:, 1:], axis=1) for tmp in atten], axis=0), device=img.device)
+            atten = torch.mean(torch.stack([torch.mean(tmp[:, 1:, 1:], axis=1) for tmp in atten], dim=0), dim=0)
         if self.output_atten:
             return self.mlp_head(x), atten.view(atten.shape[0], self.split_height, self.split_width)  # (bs, num_classes), (bs, self.split_height, self.split_width)
         return self.mlp_head(x)  # (bs, num_classes)

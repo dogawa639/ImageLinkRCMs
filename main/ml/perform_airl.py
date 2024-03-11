@@ -38,7 +38,7 @@ if __name__ == "__main__":
     # train setting
     read_train = config["TRAIN"]
     bs = int(read_train["bs"])  # int
-    epoch = 50#int(read_train["epoch"])  # int
+    epoch = 5#int(read_train["epoch"])  # int
     lr_g = float(read_train["lr_g"])  # float
     lr_d = float(read_train["lr_d"])  # float
     lr_f0 = float(read_train["lr_f0"])  # float
@@ -57,20 +57,11 @@ if __name__ == "__main__":
     sln = False  # bool(read_model_general["sln"])  # bool
     h_dim = int(read_model_general["h_dim"])  # int
     w_dim = int(read_model_general["w_dim"])  # int
-
+    use_compressed_image = bool(read_model_general["use_compressed_image"])  # bool
 
     # encoder setting
     read_model_enc = config["ENCODER"]
-    patch_size_enc = int(read_model_enc["patch_size"])  # int
-    vit_patch_size_enc = json.loads(read_model_enc["vit_patch_size"])  # int
-    mid_dim_enc = int(read_model_enc["mid_dim"])  # int
-    emb_dim_enc = int(read_model_enc["emb_dim"])  # int
-    num_source_enc = int(read_model_enc["num_source"])  # int
-    num_head_enc = int(read_model_enc["num_head"])  # int
-    depth_enc = int(read_model_enc["depth"])  # int
-    dropout_enc = float(read_model_enc["dropout"])  # float
-    output_atten_enc = True if read_model_enc["output_atten"] == "true" else False  # bool
-
+    model_type_enc = read_model_enc["model_type"]  # cnn or vit
 
     # save setting
     read_save = config["SAVE"]
@@ -114,7 +105,10 @@ if __name__ == "__main__":
         model_names += ["FNW"]
         model_names += ["CNNWEnc"] if model_type == "cnn" else ["GNNWEnc"]
     if use_encoder:
-        model_names += ["CNNEnc"]
+        if model_type_enc == 'cnn':
+            model_names += ["CNNEnc"]
+        elif model_type_enc == 'vit':
+            model_names += ["ViTEnc"]
 
     if not use_f0 and not use_encoder:
         discriminator, generator = get_models(model_names, nw_data=nw_data, output_channel=output_channel, config=config)
@@ -136,7 +130,7 @@ if __name__ == "__main__":
     ratio = (0.8, 0.2)
 
     airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=image_data, encoder=encoder, h_dim=h_dim, f0=f0,
-                 hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, device=device)
+                 hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, use_compressed_image=use_compressed_image, device=device)
 
     if TRAIN:
         airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, ratio=ratio, max_train_num=10, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)

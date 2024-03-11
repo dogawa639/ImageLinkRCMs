@@ -51,7 +51,7 @@ class PP:
             raise ValueError("The sum of ratio must be less or equal to 1.")
         trip_nums = (len(self.path_dict) * np.array(ratio)).astype(int)
         trip_nums = trip_nums.cumsum()
-        trip_nums[-1] = len(self.path_dict)
+        #trip_nums[-1] = len(self.path_dict)
         tids_shuffled = np.random.permutation(self.tids)
         tids_shuffled = np.array([self.path_dict[tid]["id"] for tid in tids_shuffled])
         result = []
