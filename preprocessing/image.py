@@ -109,7 +109,7 @@ class LinkImageData:
             if "data_dir" in data:
                 path = os.path.join(data["data_dir"], f"{self.lids[idx]}.png")
                 if os.path.exists(path):
-                    image = self.image_dataset_base.preprocess(Image.open(path)) # (c, h, w)
+                    image = self.image_dataset_base.preprocess(Image.open(path))  # (c, h, w)
                     imgs.append(image)
                     shape = image.shape
                 else:

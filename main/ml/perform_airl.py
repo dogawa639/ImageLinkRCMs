@@ -38,7 +38,7 @@ if __name__ == "__main__":
     # train setting
     read_train = config["TRAIN"]
     bs = int(read_train["bs"])  # int
-    epoch = 5#int(read_train["epoch"])  # int
+    epoch = int(read_train["epoch"])  # int
     lr_g = float(read_train["lr_g"])  # float
     lr_d = float(read_train["lr_d"])  # float
     lr_f0 = float(read_train["lr_f0"])  # float
@@ -69,9 +69,9 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    TRAIN = True
-    TEST = True
-    SHAP = True
+    TRAIN =True
+    TEST = False
+    SHAP = False
 
     # instance creation
     use_index = (model_type == "cnn")
@@ -127,6 +127,7 @@ if __name__ == "__main__":
 
     #image_data = None
     #encoder = None
+    # set emb_dim_enc = 0, enc_dim_dis = 0 if not using encoder
     ratio = (0.8, 0.2)
 
     airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=image_data, encoder=encoder, h_dim=h_dim, f0=f0,
@@ -136,7 +137,8 @@ if __name__ == "__main__":
         airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, ratio=ratio, max_train_num=10, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
     if TEST:
         airl.load()
-        airl.test(datasets_test)
+        #airl.test(datasets_test)
+        airl.show_attention_map([0])
     if SHAP:
         airl.load()
         airl.get_shap(datasets_test, 0)

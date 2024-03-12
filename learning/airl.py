@@ -109,6 +109,7 @@ class AIRL:
                         w = self.f0(batch_real[-1])  # (bs, w_dim)
                     if self.use_encoder:
                         # append image_feature to the original feature
+                        self.encoder.train()
                         batch_real = self.cat_image_feature(batch_real, w=w)
 
                     if self.sln:
@@ -174,6 +175,7 @@ class AIRL:
                         w = self.f0(batch_real[-1])  # (bs, w_dim)
                     if self.use_encoder:
                         # append image_feature to the original feature
+                        self.encoder.eval()
                         batch_real = self.cat_image_feature(batch_real, w=w)
 
                     if self.sln:
@@ -401,12 +403,15 @@ class AIRL:
                 if type(compressed) is not tuple:
                     print("Attention map is only available for ViT encoder.")
                     raise NotImplementedError
-                atten = compressed[1].detach().cpu().numpy()
+                atten = compressed[1].detach().cpu().numpy().squeeze(axis=0)
                 ax = fig.add_subplot(len(idxs), len_imgs * 2, (len_imgs * 2) * i + num_source + 1)
-                ax.imshow(img.detach().cpu().numpy().transpose(1, 2, 0))
+                img_show = img.detach().cpu().numpy().squeeze(axis=0).transpose(1, 2, 0)
+                img_show = ((img_show - img_show.min()) / (img_show.max() - img_show.min()) * 255).astype(np.uint8)
+                ax.imshow(img_show)
                 ax = fig.add_subplot(len(idxs), len_imgs * 2, (len_imgs * 2) * i + num_source + 1 + len_imgs)
-                ax.imshow(atten)
+                ax.imshow(atten, interpolation='bilinear')
         plt.show()
+        print("show_attention_map end.")
 
     def loss(self, log_d_g, log_d_d, hinge_loss=False):
         # log_d_g, log_d_d: (log d_for_g, log 1-d_for_g), (log d_for_d, log 1-d_for_d)
