@@ -387,6 +387,75 @@ class MeshDataset(Dataset):
         return state, context
 
 
+class MeshDatasetStatic(Dataset):
+    def __init__(self, mesh_traj_data, d):
+        self.mesh_traj_data = mesh_traj_data  # MeshTrajStatic
+        self.d = d
+        self.mnw_data = mesh_traj_data.mnw_data
+        self.prop_dim = mesh_traj_data.mnw_data.prop_dim  # prop_dim: output_channel + common_channel
+        self.output_channel = len(mesh_traj_data.data_list)
+        self.trip_nums = mesh_traj_data.get_trip_nums()
+
+        self.common_state = mesh_traj_data.get_state(0)[self.output_channel:, :, :]  # common for all time
+
+        self.state = [None for _ in range(self.output_channel)]
+        self.context = [None for _ in range(self.output_channel)]
+        self.next_state = [None for _ in range(self.output_channel)]
+        self.mask = [None for _ in range(self.output_channel)]
+
+        self.channel = None
+
+    def __getitem__(self, idx):
+        if self.channel is None:
+            raise Exception("Please set channel first.")
+        return self.state[self.channel][idx], self.context[self.channel][idx], self.next_state[self.channel][idx], self.mask[self.channel][idx]
+
+    def _set_values(self):
+        self.state = torch.zeros((self.trip_nums[channel], self.prop_dim, 2 * self.d + 1, 2 * self.d + 1),
+                                 dtype=torch.float32)
+        self.context = torch.zeros((self.trip_nums[channel], 1, 2 * self.d + 1, 2 * self.d + 1),
+                                   dtype=torch.float32)  # context: distance
+        self.next_state = torch.zeros((self.trip_nums[channel], 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
+        self.mask = torch.zeros((self.trip_nums[channel], 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
+
+        cnt = 0
+        for i in range(len(self.mesh_traj_data.times)):
+            prop = self.mesh_traj_data.get_state(i)[:self.output_channel]  # (prop_dim, H, W)
+            idxs, next_idxs, d_idxs, aids = self.mesh_traj_data.get_action(
+                i)  # (num_channel, num_agents, 2), (num_channel, num_agents, 2), (num_channel, num_agents, 2), (num_channel, num_agents)
+
+            for j in range(idxs[channel].shape[0]):  # num_agents
+                min_y = max(0, idxs[channel][j, 0] - self.d)
+                max_y = min(prop.shape[1], idxs[channel][j, 0] + self.d + 1)
+                min_x = max(0, idxs[channel][j, 1] - self.d)
+                max_x = min(prop.shape[2], idxs[channel][j, 1] + self.d + 1)
+                min_y_local = min_y - (idxs[channel][j, 0] - self.d)
+                max_y_local = max_y - (idxs[channel][j, 0] - self.d)
+                min_x_local = min_x - (idxs[channel][j, 1] - self.d)
+                max_x_local = max_x - (idxs[channel][j, 1] - self.d)
+
+                next_x = next_idxs[channel][j, 0] - min_x
+                next_y = next_idxs[channel][j, 1] - min_y
+                next_x = min(max(0, next_x), 2 * self.d)
+                next_y = min(max(0, next_y), 2 * self.d)
+
+                d_point = self.mnw_data.cells[idxs[channel][j, 0]][idxs[channel][j, 1]].center
+                dist = self.mnw_data.distance_from(d_point)  # (H, W)
+
+                self.state[cnt, :self.output_channel, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(
+                    prop[:, min_y:max_y, min_x:max_x])
+                self.state[cnt, self.output_channel:, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(
+                    self.common_state[:, min_y:max_y, min_x:max_x])
+                self.context[cnt, 0, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(
+                    dist[min_y:max_y, min_x:max_x])
+                self.next_state[cnt, next_y, next_x] = 1
+                # add other agents at the same time
+                self.mask[cnt, min_y_local:max_y_local,
+                min_x_local:max_x_local] = 1.0  # tensor(self.common_state[:, min_y:max_y, min_x:max_x].sum(axis=0) == 0)
+                cnt += 1
+
+
+
 class PatchDataset(Dataset):
     # all model are preloaded
     def __init__(self, patches):

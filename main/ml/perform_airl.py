@@ -98,7 +98,6 @@ if __name__ == "__main__":
         image_data_list = [LinkImageData(image_data, nw_data) for image_data in image_data_list]
         image_data = CompressedImageData(image_data_list)
 
-
     # model_names : [str] [discriminator, generator, (f0, w_encoder), (encoder)]
     model_names = ["CNNDis", "CNNGen"] if model_type == "cnn" else ["GNNDis", "GNNGen"]
     if use_f0:

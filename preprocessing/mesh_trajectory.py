@@ -216,4 +216,31 @@ class MeshTraj:
         return new_data_list
 
 
+class MeshTrajStatic:
+    def __init__(self, data_list, mnw_data):
+        # non-agent property of network is already set.
+        # information of agents is not included in mnw_data property.
+        data_list = [read_csv(data) if type(data) == str else data for data in data_list]  # [ID, x, y, time], len: num_transportations
+        data_list = [data[mnw_data.contains(data[["x", "y"]].values)] for data in data_list]  # remove data out of mesh network
+        self.data_list = data_list
+        self.mnw_data = mnw_data
+
+        self._set_mesh_idxs()  # set mesh transition data for each agent
+
+    def _set_mesh_idxs(self):
+        self.mesh_idxs = []  # list(df[ID, idx, idx_next, d_x, d_y])
+        for i, data in enumerate(self.data_list):
+            ids = np.unique(data["ID"].values)
+            mesh_idx = []
+            for tmp_id in ids:
+                target = data[data["ID"] == tmp_id]
+                idx = self.mnw_data.get_idx(target[["x", "y"]].values)  # np.array(num_points, 2)
+                # remove the duplicated idx
+                diff = np.diff(idx, axis=0).sum(1)
+                diff = np.concatenate([np.array([True]), (diff != 0).astype(bool)])
+                idx = idx[diff]
+
+
+
+
 

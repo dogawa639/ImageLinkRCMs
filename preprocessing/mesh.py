@@ -308,7 +308,6 @@ class MeshNetwork:
         ax.quiver(x, y, u, v, angles='xy', scale_units='xy', scale=1, color="red")
         plt.show()
 
-
     @staticmethod
     def get_angle(start_point, end_points):
         # start_point: (x, y)
@@ -329,6 +328,27 @@ class MeshNetwork:
         if dx < 0:
             arctan += 180.0
         return arctan % 360
+
+    @staticmethod
+    def interpolate(idx1, idx2):
+        # idx: (y_idx, x_idx)
+        # return: np.array(num_points, 2)
+        dy = idx2[0] - idx1[0]
+        dx = idx2[1] - idx1[1]
+        idx1 = [*idx1]; idx2 = [*idx2]
+        path = [idx1]
+        while dx != 0 or dy != 0:
+            if abs(dx) > abs(dy):
+                idx1[1] += np.sign(dx)
+            elif abs(dx) < abs(dy):
+                idx1[0] += np.sign(dy)
+            else:
+                idx1[0] += np.sign(dy)
+                idx1[1] += np.sign(dx)
+            dx = idx2[1] - idx1[1]
+            dy = idx2[0] - idx1[0]
+            path.append(idx1)
+        return np.array(path)
 
 
 

@@ -36,7 +36,7 @@ if __name__ == "__main__":
     streetview_data_path = read_data["streetview_data_path"]  # json
 
     read_feature = config["FEATURE"]
-    num_classes = int(read_feature["max_class_num"])  # class_num (including other class, class_num = 0)
+    num_classes = int(read_feature["max_class_num"])  # class_num (including other class, class_num = -1)
 
     read_save = config["SAVE"]
     model_dir = read_save["model_dir"]

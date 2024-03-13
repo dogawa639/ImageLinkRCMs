@@ -155,6 +155,47 @@ class LinkImageData:
                         np.save(os.path.join(tmp_dir, f"{lid}.npy"), compressed)
 
 
+class MeshImageData:
+    image_dataset_base = ImageDatasetBase(crop=False, affine=False, transform_coincide=False, flip=False)
+
+    def __init__(self, data_file, mnw_data):
+        self.data_list = load_json(data_file)
+        self.mnw_data = mnw_data
+        self.w_dim = mnw_data.w_dim
+        self.h_dim = mnw_data.h_dim
+
+    def __len__(self):
+        return len(self.data_list)
+
+    def load_mesh_image(self, i, j=None):
+        if j is not None:
+            i = i * self.w_dim + j
+        res = []
+        for j in range(len(self.data_list)):
+            res.append(self.data_all[j][i])
+        return res
+
+    def _load_image(self):
+        self.data_all = []  # list([np.array((c, H, W), dtype=np.uin8)])
+        for idx, data in enumerate(self.data_list):
+            tmp_dir = data["data_dir"]
+            for i in range(self.h_dim):
+                for j in range(self.w_dim):
+                    path = os.path.join(tmp_dir, f"{i}_{j}.png")
+                    if os.path.exists(path):
+                        image = self.image_dataset_base.preprocess(Image.open(path))
+                        if len(image.shape) == 2:
+                            image = image.unsqueeze(0)
+                        if i == 0 and j == 0:
+                            self.data_all.append([image])
+                        else:
+                            self.data_all[idx].append(image)
+                    else:
+                        if i == 0 and j == 0:
+                            self.data_all.append([None])
+                        else:
+                            self.data_all[idx].append(None)
+
 # 画像データの読み込み，座標付与
 class SatelliteImageData:
     # currently only the same utm_num for all model is allowed.
@@ -402,6 +443,48 @@ class SatelliteImageData:
                 patch.save(path)
         self._output_data_file()
 
+    def split_by_mesh(self, mnw_data, data_dir, patch_size=None):
+        # For mesh network
+        # mnw_data: MeshNetwork in mesh.py
+        # return: None (set data_folder only)
+        self.mnw_data = mnw_data
+        coords = mnw_data.coords  # 平面直角座標 (left, bootom, right, top)
+        border_xs = np.linspace(coords[0], coords[2], mnw_data.w_dim + 1)  # coords[0], coords[2] are included
+        border_ys = np.linspace(coords[3], coords[1], mnw_data.h_dim + 1)  # coords[1], coords[3] are included
+
+        for idx, data in enumerate(self.data_list):
+            tmp_dir = os.path.join(data_dir, data["name"])
+            self.data_list[idx]["data_dir"] = tmp_dir
+            if not os.path.exists(tmp_dir):
+                os.makedirs(tmp_dir)
+
+            with rasterio.open(data["path"]) as src:
+                profile = src.profile
+            transformation = profile["transform"]
+            image = np.array(Image.open(data["path"]))  # RGB (H, W, 3) or gray (H, W)
+            h, w = image.shape[:2]
+            channel = 1 if len(image.shape) == 2 else image.shape[2]
+
+            row_idxs = [rasterio.transform.rowcol(transformation, coords[0], y)[0] for y in border_ys]  # row_idxs of border
+            col_idxs = [rasterio.transform.rowcol(transformation, x, coords[1])[1] for x in border_xs]  # col_idxs of border
+            patch_shape = (row_idxs[1] - row_idxs[0], col_idxs[1] - col_idxs[0]) if len(image.shape) == 2 else (row_idxs[1] - row_idxs[0], col_idxs[1] - col_idxs[0], channel)
+            for i in range(mnw_data.h_dim):
+                for j in range(mnw_data.w_dim):
+                    left, bottom = col_idxs[j], row_idxs[i]
+                    right, top = col_idxs[j+1], row_idxs[i+1]
+                    if left < 0 or right > w or bottom < 0 or top > h:
+                        cropped_image = np.zeros(patch_shape, dtype=np.uint8)
+                    else:
+                        cropped_image = image[bottom:top, left:right]
+                    if patch_size is not None:
+                        cropped_image = cv2.resize(cropped_image, (patch_size, patch_size))
+
+                    path = os.path.join(tmp_dir, f"{i}_{j}.png")
+                    cropped_image = Image.fromarray(cropped_image)
+                    cropped_image.save(path)
+
+        self._output_data_file()
+
     # internal functions
     def _get_xy(self):
         # 座標取得
@@ -611,6 +694,7 @@ class SatelliteImageData:
             coords = [(bounds[0], bounds[3]), (bounds[0], bounds[1]), (bounds[2], bounds[1]), (bounds[2], bounds[3])]   # north west, south west, south east, north east
         return coords, bounds
 
+
 class OneHotImageData(SatelliteImageData):
     required_prop = ["name", "geo_path", "z", "x", "y", "utm_num"]
     def __init__(self, data_file, max_class_num=10, resolution=None, output_data_file=None, output_mask_file=None):
@@ -687,6 +771,58 @@ class OneHotImageData(SatelliteImageData):
             if tmp_val is not None:
                 df.loc[:, [f"{data_name}_{j}" for j in range(tmp_val.shape[1])]] = tmp_val
         df.to_csv(output_path, index=False)
+
+    def split_by_mesh(self, mnw_data, data_dir, patch_size=None, aggregate=False):
+        # For mesh network
+        # mnw_data: MeshNetwork in mesh.py
+        # return: None (set data_folder only)
+        self.mnw_data = mnw_data
+        coords = mnw_data.coords  # 平面直角座標 (left, bootom, right, top)
+        border_xs = np.linspace(coords[0], coords[2], mnw_data.w_dim + 1)  # coords[0], coords[2] are included
+        border_ys = np.linspace(coords[3], coords[1], mnw_data.h_dim + 1)  # coords[1], coords[3] are included
+
+        for idx, data in enumerate(self.data_list):
+            tmp_dir = os.path.join(data_dir, data["name"])
+            self.data_list[idx]["data_dir"] = tmp_dir
+            if not os.path.exists(tmp_dir):
+                os.makedirs(tmp_dir)
+
+            with rasterio.open(data["path"]) as src:
+                profile = src.profile
+            transformation = profile["transform"]
+            image = np.array(Image.open(data["path"]))  # RGB (H, W, 3) or gray (H, W)
+            h, w = image.shape
+
+            row_idxs = [rasterio.transform.rowcol(transformation, coords[0], y)[0] for y in border_ys]  # row_idxs of border
+            col_idxs = [rasterio.transform.rowcol(transformation, x, coords[1])[1] for x in border_xs]  # col_idxs of border
+            patch_shape = (row_idxs[1] - row_idxs[0], col_idxs[1] - col_idxs[0])
+            class_num = min(self.gis_segs[i].class_num, self.max_class_num)
+            aggregated = np.zeros((mnw_data.h_dim, mnw_data.w_dim, class_num), dtype=float)
+
+            for i in range(mnw_data.h_dim):
+                for j in range(mnw_data.w_dim):
+                    left, bottom = col_idxs[j], row_idxs[i]
+                    right, top = col_idxs[j+1], row_idxs[i+1]
+                    if left < 0 or right > w or bottom < 0 or top > h:
+                        cropped_image = np.zeros(patch_shape, dtype=np.uint8)
+                    cropped_image = image[bottom:top, left:right]
+                    if patch_size is not None:
+                        cropped_image = cv2.resize(cropped_image, (patch_size, patch_size))
+
+                    path = os.path.join(tmp_dir, f"{i}_{j}.png")
+                    cropped_image = Image.fromarray(cropped_image)
+                    cropped_image.save(path)
+
+                    if aggregate:
+                        color, count = np.unique(np.array(cropped_image).flatten(), return_counts=True, axis=0)
+                        total_count = count.sum()
+                        for k, c in enumerate(color):
+                            if c < class_num:
+                                aggregated[i, j, c] = count[k] / total_count
+                            else:
+                                aggregated[i, j, -1] += count[k] / total_count
+            if aggregate:
+                np.save(os.path.join(tmp_dir, "aggregated.npy"), aggregated)
 
     # inside functions
     def _transform2image(self):

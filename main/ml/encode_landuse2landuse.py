@@ -28,7 +28,7 @@ if __name__ == "__main__":
     onehot_data_dir = read_data["onehot_image_datadir"]  # dir
 
     read_feature = config["FEATURE"]
-    num_classes = int(read_feature["max_class_num"])  # class_num (including other class, class_num = 0)
+    num_classes = int(read_feature["max_class_num"])  # class_num (including other class, class_num = -1)
 
     read_save = config["SAVE"]
     model_dir = read_save["model_dir"]
