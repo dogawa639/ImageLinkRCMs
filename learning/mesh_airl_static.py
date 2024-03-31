@@ -438,8 +438,8 @@ class MeshAIRLStatic:
         if self.use_encoder:
             for bs in range(state.shape[0]):
                 images = self.image_data.load_mesh_images(idx[bs, 0], idx[bs, 1],
-                                                          self.dataset.d)  # [tensor((2d+1)^2, c, h, w)]
-                compressed = [self.encoders[tmp_channel].compress(images[0], 0) for tmp_channel in range(self.output_channel)]  # [tensor((2d+1)^2, emb_dim) or tuple]
+                                                          self.dataset.d)[0].to(self.device)  # tensor((2d+1)^2, c, h, w)
+                compressed = [self.encoders[tmp_channel].compress(images, 0) for tmp_channel in range(self.output_channel)]  # [tensor((2d+1)^2, emb_dim) or tuple]
                 compressed = [compressed[tmp_channel][0] if self.encoders[tmp_channel].output_atten else compressed[tmp_channel] for tmp_channel in range(self.output_channel)]  # [tensor((2d+1)^2, emb_dim)]
                 tmp_feature = self.encoders[channel](compressed[channel])  # currently only one image is used. tensor((2d+1)^2, emb_dim)
                 tmp_other_feature = [self.encoders[tmp_channel](compressed[tmp_channel].clone().detach()).clone().detach() for tmp_channel in range(self.output_channel)]  # [tensor((2d+1)^2, emb_dim)]
