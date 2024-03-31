@@ -1,6 +1,6 @@
 # Route Choice Models with Link Image
 
-## Abstruct
+## Abstract
 Main components
 - Preprocessing
 - Model
