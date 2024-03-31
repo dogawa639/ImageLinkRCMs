@@ -25,7 +25,7 @@ from preprocessing.geo_util import GISSegmentation
 from preprocessing.dataset import PatchDataset
 from preprocessing.geo_util import tile2lonlat
 from preprocessing.dataset import ImageDatasetBase
-__all__ = ["CompressedImageData", "LinkImageData", "SatelliteImageData", "OneHotImageData"]
+__all__ = ["CompressedImageData", "LinkImageData", "MeshImageData", "SatelliteImageData", "OneHotImageData"]
 
 
 class CompressedImageData:
@@ -158,11 +158,18 @@ class LinkImageData:
 class MeshImageData:
     image_dataset_base = ImageDatasetBase(crop=False, affine=False, transform_coincide=False, flip=False)
 
-    def __init__(self, data_file, mnw_data):
+    def __init__(self, data_file, mnw_data, img_shapes=None):
         self.data_list = load_json(data_file)
         self.mnw_data = mnw_data
         self.w_dim = mnw_data.w_dim
         self.h_dim = mnw_data.h_dim
+
+        if img_shapes is None:
+            self.img_shapes = [None for _ in range(len(self.data_list))]
+        else:
+            self.img_shapes = img_shapes
+
+        self._load_image()
 
     def __len__(self):
         return len(self.data_list)
@@ -170,31 +177,49 @@ class MeshImageData:
     def load_mesh_image(self, i, j=None):
         if j is not None:
             i = i * self.w_dim + j
+        if i < 0 or i >= self.h_dim * self.w_dim:
+            return [torch.zeros(self.img_shapes[idx], dtype=torch.float32, requires_grad=False) for idx in range(len(self.data_list))]
         res = []
         for j in range(len(self.data_list)):
             res.append(self.data_all[j][i])
         return res
 
+    def load_mesh_images(self, i, j=None, d=0):
+        res = [None for _ in range(len(self.data_list))]  # [tensor((2 * d +1)^2, c, h, w)] len: len(self.data_list)
+        for di in range(-d, d+1):
+            for dj in range(-d, d+1):
+                idx = (d+di) * (2 * d + 1) + (d+dj)
+                imgs = self.load_mesh_image(i+di, j+dj)  # [tensor(c, h, w)] len: len(self.data_list)
+                for k, img in enumerate(imgs):
+                    if res[k] is None and img is not None:
+                        res[k] = torch.zeros(((2 * d + 1) ** 2, *img.shape), dtype=torch.float32, requires_grad=False)
+                    elif img is not None:
+                        res[k][idx] = img
+        return res
+
     def _load_image(self):
-        self.data_all = []  # list([np.array((c, H, W), dtype=np.uin8)])
+        self.data_all = [[] for _ in range(len(self.data_list))]  # list([np.array((c, H, W), dtype=np.uin8)])
         for idx, data in enumerate(self.data_list):
             tmp_dir = data["data_dir"]
             for i in range(self.h_dim):
                 for j in range(self.w_dim):
                     path = os.path.join(tmp_dir, f"{i}_{j}.png")
                     if os.path.exists(path):
-                        image = self.image_dataset_base.preprocess(Image.open(path))
+                        image = Image.open(path)
+                        if self.img_shapes[idx] is not None:
+                            image = image.resize(self.img_shapes[idx][-1:0:-1], Image.BILINEAR)
+                        image = self.image_dataset_base.preprocess(image)
                         if len(image.shape) == 2:
                             image = image.unsqueeze(0)
-                        if i == 0 and j == 0:
-                            self.data_all.append([image])
-                        else:
-                            self.data_all[idx].append(image)
+                        image.requires_grad = False
+                        self.data_all[idx].append(image)
+                        self.img_shapes[idx] = image.shape
                     else:
                         if i == 0 and j == 0:
                             self.data_all.append([None])
                         else:
                             self.data_all[idx].append(None)
+
 
 # 画像データの読み込み，座標付与
 class SatelliteImageData:
@@ -796,8 +821,10 @@ class OneHotImageData(SatelliteImageData):
             row_idxs = [rasterio.transform.rowcol(transformation, coords[0], y)[0] for y in border_ys]  # row_idxs of border
             col_idxs = [rasterio.transform.rowcol(transformation, x, coords[1])[1] for x in border_xs]  # col_idxs of border
             patch_shape = (row_idxs[1] - row_idxs[0], col_idxs[1] - col_idxs[0])
-            class_num = min(self.gis_segs[i].class_num, self.max_class_num)
-            aggregated = np.zeros((mnw_data.h_dim, mnw_data.w_dim, class_num), dtype=float)
+            if patch_size is not None:
+                patch_shape = (patch_size, patch_size)
+            class_num = min(self.gis_segs[idx].class_num, self.max_class_num)
+            aggregated = np.zeros((class_num, mnw_data.h_dim, mnw_data.w_dim), dtype=float)
 
             for i in range(mnw_data.h_dim):
                 for j in range(mnw_data.w_dim):
@@ -805,7 +832,8 @@ class OneHotImageData(SatelliteImageData):
                     right, top = col_idxs[j+1], row_idxs[i+1]
                     if left < 0 or right > w or bottom < 0 or top > h:
                         cropped_image = np.zeros(patch_shape, dtype=np.uint8)
-                    cropped_image = image[bottom:top, left:right]
+                    else:
+                        cropped_image = image[bottom:top, left:right]
                     if patch_size is not None:
                         cropped_image = cv2.resize(cropped_image, (patch_size, patch_size))
 
@@ -818,9 +846,9 @@ class OneHotImageData(SatelliteImageData):
                         total_count = count.sum()
                         for k, c in enumerate(color):
                             if c < class_num:
-                                aggregated[i, j, c] = count[k] / total_count
+                                aggregated[c, i, j] = count[k] / total_count
                             else:
-                                aggregated[i, j, -1] += count[k] / total_count
+                                aggregated[-1, i, j] += count[k] / total_count
             if aggregate:
                 np.save(os.path.join(tmp_dir, "aggregated.npy"), aggregated)
 

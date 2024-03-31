@@ -85,9 +85,11 @@ def get_models(model_names, nw_data=None, output_channel=None, config=None):
             adj_matrix = torch.tensor(nw_data.edge_graph).to(torch.float32)
             models.append(GNNWEnc(nw_data.feature_num, emb_dim_wenc, w_dim, adj_matrix))
         elif model_name == "UNetDis":
-            models.append(UNetDis(nw_data.prop_dim, 1, output_channel, gamma=gamma, sn=True, ext_coeff=ext_coeff))
+            models.append(UNetDis(nw_data.prop_dim+emb_dim_enc, 1, output_channel, gamma=gamma, sn=True, ext_coeff=ext_coeff))
+        elif model_name == "UNetDisStatic":
+            models.append(UNetDisStatic(nw_data.prop_dim+emb_dim_enc, 1, output_channel, gamma=gamma, sn=True, ext_coeff=ext_coeff))
         elif model_name == "UNetGen":
-            models.append(UNetGen(nw_data.prop_dim, 1, sn=sn_gen))
+            models.append(UNetGen(nw_data.prop_dim+emb_dim_enc, 1, sn=sn_gen))
         else:
             raise Exception("Unknown model name: {}".format(model_name))
 

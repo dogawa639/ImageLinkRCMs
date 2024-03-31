@@ -8,7 +8,7 @@ from models.unet import UNet
 from models.general import FF, SLN, softplus
 
 import numpy as np
-__all__ = ["CNNDis", "GNNDis", "UNetDis"]
+__all__ = ["CNNDis", "GNNDis", "UNetDis", "UNetDisStatic"]
 
 
 # CNN
@@ -253,7 +253,63 @@ class UNetDis(nn.Module):
             self.load_state_dict(torch.load(model_dir + "/unetdis_{}.pth".format(i)))
 
 
+class UNetDisStatic(nn.Module):
+    # one discriminator for one transportation
+    def __init__(self, feature_num, context_num, output_channel,
+                 gamma=0.9, sn=True, dropout=0.0, ext_coeff=1.0, depth=1):
+        super().__init__()
+        # state : (bs, feature_num, 2d+1, 2d+1)
+        # context : (bs, context_num, 2d+1, 2d+1)
+        self.feature_num = feature_num  # contains output_channels (transportation features)
+        self.context_num = context_num
+        self.total_feature = feature_num + context_num
+        self.output_channel = output_channel  # number of transportations
+        self.gamma = gamma
+        self.ext_coeff = ext_coeff
 
+        self.util = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=depth)
+        self.ext = UNet(self.total_feature + output_channel - 1, 1, sn=True, dropout=dropout, depth=depth)  # state + other agent's pi
+        self.val = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=depth)
+
+    def forward(self, input, pi_other):
+        # input: (bs, total_feature, 2d+1, 2d+1)
+        # pi_other: (bs, output_channel-1, 2d+1, 2d+1)
+        # f_val, util, val: (bs, 2d+1, 2d+1)
+        # ext: (bs, num_agents, 2d+1, 2d+1)
+        f_val, _, _, _ = self.get_vals(input, pi_other)
+        return f_val
+
+    def get_vals(self, input, pi_other):
+        # input: (bs, total_feature, 2d+1, 2d+1)
+        # pi_other: (bs, output_channel-1, 2d+1, 2d+1)
+        # f_val, util, val: (bs, 2d+1, 2d+1)
+        # ext: (bs, num_agents, 2d+1, 2d+1)
+        if input.shape[-1] % 2 != 1:
+            raise Exception("input.shape[-1] should be odd.")
+        d = int((input.shape[-1] - 1) / 2)
+        util = self.util(input).squeeze(1)
+        val = self.val(input).squeeze(1)
+        ext_input = torch.cat((input, pi_other), dim=1)  # (bs, total_feature+output_channel-1, 2d+1, 2d+1)
+        ext = self.ext(ext_input).squeeze(1)  # (bs, 2d+1, 2d+1)
+
+        f_val = util + self.ext_coeff * ext + self.gamma * val - val[:, d, d].view(-1, 1, 1)
+        return f_val, util, ext, val  # (bs, 2d+1, 2d+1)
+
+    def get_f_val(self, util, ext, val):
+        d = int((util.shape[-1] - 1) / 2)
+        return util + self.ext_coeff * ext + self.gamma * val - val[:, d, d].view(-1, 1, 1)
+
+    def save(self, model_dir, i=None):
+        if i is None:
+            torch.save(self.state_dict(), model_dir + "/unetdisstat.pth")
+        else:
+            torch.save(self.state_dict(), model_dir + "/unetdisstat_{}.pth".format(i))
+
+    def load(self, model_dir, i=None):
+        if i is None:
+            self.load_state_dict(torch.load(model_dir + "/unetdisstat.pth"))
+        else:
+            self.load_state_dict(torch.load(model_dir + "/unetdisstat_{}.pth".format(i)))
 
 
 

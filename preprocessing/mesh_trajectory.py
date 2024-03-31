@@ -13,7 +13,7 @@ import shapely
 import datetime
 
 from utility import *
-__all__ = ["MeshTraj"]
+__all__ = ["MeshTraj", "MeshTrajStatic"]
 
 
 class MeshTraj:
@@ -72,7 +72,7 @@ class MeshTraj:
             ids = np.unique(self.data_list[i]["ID"].values)
             trip_nums = (len(ids) * np.array(ratio)).astype(int)
             trip_nums = trip_nums.cumsum()
-            trip_nums[-1] = len(ids)
+            #trip_nums[-1] = len(ids)
             ids_shuffled = np.random.permutation(ids)
             for j in range(len(ratio)):
                 if j == 0:
@@ -217,30 +217,103 @@ class MeshTraj:
 
 
 class MeshTrajStatic:
-    def __init__(self, data_list, mnw_data):
+    def __init__(self, data_list, mnw_data, data_list_small=None):
         # non-agent property of network is already set.
         # information of agents is not included in mnw_data property.
         data_list = [read_csv(data) if type(data) == str else data for data in data_list]  # [ID, x, y, time], len: num_transportations
         data_list = [data[mnw_data.contains(data[["x", "y"]].values)] for data in data_list]  # remove data out of mesh network
         self.data_list = data_list
         self.mnw_data = mnw_data
+        self.data_list_small = data_list_small
+        self.output_channel = len(data_list)
 
-        self._set_mesh_idxs()  # set mesh transition data for each agent
+        self._set_mesh_idxs()  # set mesh transition data for each agent  ["ID", "y_idx", "x_idx", "y_idx_next", "x_idx_next", "d_x", "d_y"]
+
+        for i in range(len(data_list)):
+            print("MeshTrajStatic {}: data_list num: {} (idx_num: {}), agent_num: {}".format(i, len(self.data_list[i]), len(self.mesh_idxs[i]), len(np.unique(self.data_list[i]["ID"].values))))
+
+    def get_trip_nums(self):
+        return np.array([len(data) for data in self.mesh_idxs])
+
+    def get_state(self):
+        return self.mnw_data.get_prop_array()  # (max_y_idx - min_y_idx, max_x_idx - min_x_idx, prop_dim)
+
+    def split_into(self, ratio):
+        # ratio: [train, val, test] sum = 1
+        if sum(ratio) > 1:
+            raise ValueError("The sum of ratio must be less or equal to 1.")
+        total_data_list = [[] for _ in range(len(ratio))]
+        for i in range(len(self.data_list)):
+            ids = np.unique(self.data_list[i]["ID"].values)
+            trip_nums = (len(ids) * np.array(ratio)).astype(int)
+            trip_nums = trip_nums.cumsum()
+            #trip_nums[-1] = len(ids)
+            ids_shuffled = np.random.permutation(ids)
+            for j in range(len(ratio)):
+                if j == 0:
+                    tmp_ids = ids_shuffled[:trip_nums[j]]
+                else:
+                    tmp_ids = ids_shuffled[trip_nums[j - 1]:trip_nums[j]]
+                tmp_data = self.data_list[i].loc[self.data_list[i]["ID"].isin(tmp_ids), :]
+                total_data_list[j].append(tmp_data)
+        result = []
+        for j in range(len(ratio)):
+            result.append(MeshTrajStatic(total_data_list[j], self.mnw_data))
+        return result
+
+    def get_traj_idx_one_agent(self, channel, aid):
+        data = self.mesh_idxs[channel][self.mesh_idxs[channel]["ID"] == aid]
+        return np.concatenate([data[["y_idx", "x_idx"]].values, data[["y_idx_next", "x_idx_next"]].values[[-1], :]], axis=0)  # (num_points, 2)
+
+    # visualize
+    def show_traj(self, channel, aid, save_path=None):
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 1, 1)
+        ax.set_title(f"Trajectory channel {channel}, agent {aid}")
+        ax.set_aspect('equal')
+        idxs = self.get_traj_idx_one_agent(channel, aid)
+        center_points = self.mnw_data.get_center_points(idxs)
+        x = center_points[:, 0]
+        y = center_points[:, 1]
+        u = np.diff(x)
+        v = np.diff(y)
+        ax.quiver(x[:-1], y[:-1], u, v, angles='xy', scale_units='xy', scale=1, color="red")
+        x_mesh = np.linspace(self.mnw_data.coords[0], self.mnw_data.coords[2], self.mnw_data.w_dim + 1)
+        y_mesh = np.linspace(self.mnw_data.coords[1], self.mnw_data.coords[3], self.mnw_data.h_dim + 1)
+        for i in range(self.mnw_data.w_dim + 1):
+            ax.axvline(x_mesh[i], color="gray", linestyle="--")
+        for i in range(self.mnw_data.h_dim + 1):
+            ax.axhline(y_mesh[i], color="gray", linestyle="--")
+        if save_path is not None:
+            fig.savefig(save_path)
+        plt.show()
 
     def _set_mesh_idxs(self):
         self.mesh_idxs = []  # list(df[ID, idx, idx_next, d_x, d_y])
         for i, data in enumerate(self.data_list):
             ids = np.unique(data["ID"].values)
             mesh_idx = []
+            data_small = None
             for tmp_id in ids:
                 target = data[data["ID"] == tmp_id]
                 idx = self.mnw_data.get_idx(target[["x", "y"]].values)  # np.array(num_points, 2)
                 # remove the duplicated idx
                 diff = np.diff(idx, axis=0).sum(1)
-                diff = np.concatenate([np.array([True]), (diff != 0).astype(bool)])
-                idx = idx[diff]
+                active = np.concatenate([np.array([True]), (diff != 0).astype(bool)])
+                idx = idx[active]
+                for j in range(len(idx) - 1):
+                    interpolated = self.mnw_data.interpolate(idx[j], idx[j + 1])  # interplate the trajectory
+                    for k in range(len(interpolated) - 1):
+                        mesh_idx.append([tmp_id, *interpolated[k], *interpolated[k + 1], *target[["x", "y"]].values[-1]])
+                if self.data_list_small is not None:
+                    if data_small is None:
+                        data_small = target[active]
+                    else:
+                        data_small = pd.concat([data_small, target[active]], axis=0)
+            if self.data_list_small is not None:
+                data_small.to_csv(self.data_list_small[i], index=False)
 
-
+            self.mesh_idxs.append(pd.DataFrame(mesh_idx, columns=["ID", "y_idx", "x_idx", "y_idx_next", "x_idx_next", "d_x", "d_y"]))
 
 
 

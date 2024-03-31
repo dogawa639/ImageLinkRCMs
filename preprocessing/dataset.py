@@ -24,7 +24,7 @@ from utility import read_csv, load_json, dump_json
 from preprocessing.geo_util import MapSegmentation
 from preprocessing.pp import PP
 
-__all__ = ["GridDataset", "PPEmbedDataset", "MeshDataset", "PatchDataset", "XImageDataset", "XYImageDataset", "XHImageDataset", "StreetViewDataset", "StreetViewXDataset", "ImageDataset", "calc_loss"]
+__all__ = ["GridDataset", "PPEmbedDataset", "MeshDataset", "MeshDatasetStatic", "MeshDatasetStaticSub","PatchDataset", "XImageDataset", "XYImageDataset", "XHImageDataset", "StreetViewDataset", "StreetViewXDataset", "ImageDataset", "calc_loss"]
 
 
 class GridDataset(Dataset):
@@ -387,7 +387,8 @@ class MeshDataset(Dataset):
         return state, context
 
 
-class MeshDatasetStatic(Dataset):
+class MeshDatasetStatic:
+    #
     def __init__(self, mesh_traj_data, d):
         self.mesh_traj_data = mesh_traj_data  # MeshTrajStatic
         self.d = d
@@ -396,64 +397,83 @@ class MeshDatasetStatic(Dataset):
         self.output_channel = len(mesh_traj_data.data_list)
         self.trip_nums = mesh_traj_data.get_trip_nums()
 
-        self.common_state = mesh_traj_data.get_state(0)[self.output_channel:, :, :]  # common for all time
+        self.common_state =tensor(mesh_traj_data.get_state(), dtype=torch.float32)  # common for all transportation
 
-        self.state = [None for _ in range(self.output_channel)]
-        self.context = [None for _ in range(self.output_channel)]
+        self.state = [None for _ in range(self.output_channel)]  # state of the current and next mesh
+        self.context = [None for _ in range(self.output_channel)]  # context: distance
         self.next_state = [None for _ in range(self.output_channel)]
-        self.mask = [None for _ in range(self.output_channel)]
+        self.mask = None
+        self.idxs = [None for _ in range(self.output_channel)]  # idxs: (y_idx, x_idx) of current mesh
 
-        self.channel = None
+        self._set_values()
 
-    def __getitem__(self, idx):
-        if self.channel is None:
-            raise Exception("Please set channel first.")
-        return self.state[self.channel][idx], self.context[self.channel][idx], self.next_state[self.channel][idx], self.mask[self.channel][idx]
+    def split_into(self, ratio):
+        # ratio: [train, test, validation]
+        mesh_traj_data = self.mesh_traj_data.split_into(ratio)
+        return [MeshDatasetStatic(mesh_traj_data[i], self.d) for i in range(len(ratio))]
+
+    def get_sub_datasets(self):
+        return [MeshDatasetStaticSub(self.state[channel], self.context[channel], self.next_state[channel], self.mask, self.idxs[channel]) for channel in range(self.output_channel)]
 
     def _set_values(self):
-        self.state = torch.zeros((self.trip_nums[channel], self.prop_dim, 2 * self.d + 1, 2 * self.d + 1),
-                                 dtype=torch.float32)
-        self.context = torch.zeros((self.trip_nums[channel], 1, 2 * self.d + 1, 2 * self.d + 1),
-                                   dtype=torch.float32)  # context: distance
-        self.next_state = torch.zeros((self.trip_nums[channel], 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
-        self.mask = torch.zeros((self.trip_nums[channel], 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32)
+        self.state = [torch.zeros((self.trip_nums[channel], self.prop_dim, 2 * self.d + 1, 2 * self.d + 1),
+                                 dtype=torch.float32, requires_grad=False) for channel in range(self.output_channel)]
+        self.context = [torch.zeros((self.trip_nums[channel], 1, 2 * self.d + 1, 2 * self.d + 1),
+                                   dtype=torch.float32, requires_grad=False) for channel in range(self.output_channel)]  # context: distance
+        self.next_state = [torch.zeros((self.trip_nums[channel], 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32, requires_grad=False) for channel in range(self.output_channel)]
+        self.mask = torch.ones((2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32, requires_grad=False)
+        self.mask[self.d, self.d] = 0
+        self.idxs = [torch.zeros((int(self.trip_nums[channel]), 2), dtype=torch.long) for channel in range(self.output_channel)]
 
-        cnt = 0
-        for i in range(len(self.mesh_traj_data.times)):
-            prop = self.mesh_traj_data.get_state(i)[:self.output_channel]  # (prop_dim, H, W)
-            idxs, next_idxs, d_idxs, aids = self.mesh_traj_data.get_action(
-                i)  # (num_channel, num_agents, 2), (num_channel, num_agents, 2), (num_channel, num_agents, 2), (num_channel, num_agents)
+        for channel in range(self.output_channel):
+            idxs = self.mesh_traj_data.mesh_idxs[channel]  # ["ID", "y_idx", "x_idx", "y_idx_next", "x_idx_next", "d_x", "d_y"]
+            aids = np.unique(idxs["ID"].values)
+            cnt = 0
+            for aid in aids:
+                target = idxs[idxs["ID"] == aid]
+                d_point = tuple(target[["d_x", "d_y"]].values[0])
+                dist = tensor(self.mnw_data.distance_from(d_point))  # (H, W)
+                for i in target.index:
+                    y_idx = target.loc[i, "y_idx"]
+                    x_idx = target.loc[i, "x_idx"]
+                    y_idx_next = target.loc[i, "y_idx_next"]
+                    x_idx_next = target.loc[i, "x_idx_next"]
 
-            for j in range(idxs[channel].shape[0]):  # num_agents
-                min_y = max(0, idxs[channel][j, 0] - self.d)
-                max_y = min(prop.shape[1], idxs[channel][j, 0] + self.d + 1)
-                min_x = max(0, idxs[channel][j, 1] - self.d)
-                max_x = min(prop.shape[2], idxs[channel][j, 1] + self.d + 1)
-                min_y_local = min_y - (idxs[channel][j, 0] - self.d)
-                max_y_local = max_y - (idxs[channel][j, 0] - self.d)
-                min_x_local = min_x - (idxs[channel][j, 1] - self.d)
-                max_x_local = max_x - (idxs[channel][j, 1] - self.d)
+                    min_y = max(0, y_idx - self.d)
+                    max_y = min(self.mnw_data.h_dim, y_idx + self.d + 1)
+                    min_x = max(0, x_idx - self.d)
+                    max_x = min(self.mnw_data.w_dim, x_idx + self.d + 1)
+                    min_y_local = min_y - (y_idx - self.d)
+                    max_y_local = max_y - (y_idx - self.d)
+                    min_x_local = min_x - (x_idx - self.d)
+                    max_x_local = max_x - (x_idx - self.d)
 
-                next_x = next_idxs[channel][j, 0] - min_x
-                next_y = next_idxs[channel][j, 1] - min_y
-                next_x = min(max(0, next_x), 2 * self.d)
-                next_y = min(max(0, next_y), 2 * self.d)
+                    next_y = min(max(0, y_idx_next - min_y), 2 * self.d)
+                    next_x = min(max(0, x_idx_next - min_x), 2 * self.d)
 
-                d_point = self.mnw_data.cells[idxs[channel][j, 0]][idxs[channel][j, 1]].center
-                dist = self.mnw_data.distance_from(d_point)  # (H, W)
+                    self.state[channel][cnt, :, min_y_local:max_y_local, min_x_local:max_x_local] = self.common_state[:, min_y:max_y, min_x:max_x]
+                    self.context[channel][cnt, 0, min_y_local:max_y_local, min_x_local:max_x_local] = dist[min_y:max_y, min_x:max_x]
 
-                self.state[cnt, :self.output_channel, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(
-                    prop[:, min_y:max_y, min_x:max_x])
-                self.state[cnt, self.output_channel:, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(
-                    self.common_state[:, min_y:max_y, min_x:max_x])
-                self.context[cnt, 0, min_y_local:max_y_local, min_x_local:max_x_local] = tensor(
-                    dist[min_y:max_y, min_x:max_x])
-                self.next_state[cnt, next_y, next_x] = 1
-                # add other agents at the same time
-                self.mask[cnt, min_y_local:max_y_local,
-                min_x_local:max_x_local] = 1.0  # tensor(self.common_state[:, min_y:max_y, min_x:max_x].sum(axis=0) == 0)
-                cnt += 1
+                    self.next_state[channel][cnt, next_y, next_x] = 1
+                    self.idxs[channel][cnt, 0] = y_idx
+                    self.idxs[channel][cnt, 1] = x_idx
 
+                    cnt += 1
+
+
+class MeshDatasetStaticSub(Dataset):
+    def __init__(self, state, context, next_state, mask, idxs):
+        self.state = state
+        self.context = context
+        self.next_state = next_state
+        self.mask = mask
+        self.idxs = idxs
+
+    def __len__(self):
+        return len(self.state)
+
+    def __getitem__(self, idx):
+        return self.state[idx], self.context[idx], self.next_state[idx], self.mask, self.idxs[idx]
 
 
 class PatchDataset(Dataset):

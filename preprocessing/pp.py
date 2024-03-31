@@ -346,6 +346,67 @@ class PP:
             df.to_csv(out_file, index=False)
         return df
 
+    @staticmethod
+    def extract_coords(trip_path, feeder_path, loc_path, mode_code, utm_num, mask=None, out_file=None, loc_time_format="%Y-%m-%d %H:%M:%S.%f", feeder_time_format="%Y-%m-%d %H:%M:%S", trip_time_format="%Y-%m-%d %H:%M:%S"):
+        # thresh: sec to regard as the separated trip
+        # output: df [ID, k, a, b, org, uid, mode, purpose]
+        coord = Coord(utm_num)
+        trip_data = read_csv(trip_path)  # ID,ユーザーID[,作成日時],出発時刻,到着時刻[,更新日時,有効性],目的コード（active）
+        feeder_data = read_csv(feeder_path)  # ID,トリップID,ユーザーID[,作成日時,操作タイプ(1:出発、5:移動手段変更),更新日時,有効性],移動手段コード,記録日時
+        loc_data = read_csv(loc_path)  # ID[,accuracy,bearing,speed,ユーザーID,作成日時],経度,緯度,記録日時[,高度]
+        if type(mode_code) is int:
+            mode_code = {mode_code}
+
+        trip_data["出発時刻"] = np.vectorize(lambda x: datetime.datetime.strptime(x, trip_time_format))(trip_data["出発時刻"].values)
+        trip_data["到着時刻"] = np.vectorize(lambda x: datetime.datetime.strptime(x, trip_time_format))(trip_data["到着時刻"].values)
+        feeder_data["記録日時"] = np.vectorize(lambda x: datetime.datetime.strptime(x, feeder_time_format))(feeder_data["記録日時"].values)
+        loc_data["記録日時"] = np.vectorize(lambda x: datetime.datetime.strptime(x, loc_time_format))(loc_data["記録日時"].values)
+
+        loc_data[["x", "y"]] = np.array([coord.to_utm(loc_data.loc[i, "経度"], loc_data.loc[i, "緯度"]) for i in loc_data.index])
+        if mask is not None:
+            loc_data = loc_data.loc[[mask.contains(shapely.geometry.Point(x))[0] for x in loc_data[["x", "y"]].values], :]
+
+        user_loc_data = {uid: Trip(uid, 0) for uid in loc_data["ユーザーID"].unique()}
+        for uid in user_loc_data.keys():
+            target = loc_data[loc_data["ユーザーID"] == uid]
+            user_loc_data[uid].set_points(target["記録日時"].values, target[["x", "y"]].values)
+
+        result = []  # [ID, x, y, time] ID: feeder id
+        for idx in trip_data.index:
+            tid = trip_data.loc[idx, "ID"]
+            uid = trip_data.loc[idx, "ユーザーID"]
+            purpose = trip_data.loc[idx, "目的コード（active）"]
+            # feeder 記録日時 is departure time of the unlinked trip
+            # trip 到着時刻 is arrival time of the linked trip
+            end_time = trip_data.loc[idx, "到着時刻"]
+            feeder_tmp = feeder_data[(feeder_data["ユーザーID"] == uid) & (feeder_data["トリップID"] == tid)]
+            feeder_tmp = feeder_tmp.sort_values("ID")
+            for j, f_idx in enumerate(feeder_tmp.index):
+                feeder_dep_time = feeder_tmp.loc[f_idx, "記録日時"]
+                if feeder_tmp.loc[f_idx, "移動手段コード"] not in mode_code:
+                    continue
+                mode = feeder_tmp.loc[f_idx, "移動手段コード"]
+                if j < len(feeder_tmp) - 1:
+                    feeder_end_time = feeder_tmp.loc[feeder_tmp.index[j+1], "記録日時"]
+                else:
+                    feeder_end_time = end_time
+
+                if uid not in user_loc_data:
+                    continue
+                target = user_loc_data[uid].clip(feeder_dep_time, feeder_end_time)
+                if len(target) == 0:
+                    continue
+                for i in range(len(target)):
+                    result.append([f_idx, target.gps_points[i][0], target.gps_points[i][1], pd.Timestamp(target.gps_times[i])])
+
+        if len(result) > 0:
+            df = pd.DataFrame(result, columns=["ID", "x", "y", "time"]).astype(int)
+        else:
+            df = pd.DataFrame(columns=["ID", "x", "y", "time"]).astype(int)
+        if out_file is not None:
+            df.to_csv(out_file, index=False)
+        return df
+
 
 class Trip:
     def __init__(self, uid, tid):

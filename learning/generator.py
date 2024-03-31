@@ -244,7 +244,7 @@ class UNetGen(nn.Module):
     # one generator for one transportation
     # unet bottleneck: (*, 1024, H/16, W/16)
     def __init__(self, feature_num, context_num,
-                 sn=True, dropout=0.0, depth=2):
+                 sn=True, dropout=0.0, depth=1):
         super().__init__()
         # state : (bs, feature_num, 2d+1, 2d+1)
         # context : (bs, context_num, 2d+1, 2d+1)

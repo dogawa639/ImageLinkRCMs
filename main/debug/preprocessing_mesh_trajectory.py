@@ -10,11 +10,12 @@ if __name__ == "__main__":
     config.read(CONFIG, encoding="utf-8")
 
     read_data = config["DATA"]
+    data_dir = read_data["data_dir"]
     traj_dir = read_data["traj_dir"]
 
     mnw_data = MeshNetwork((-69280, 93470, -69255, 93495), 25, 25, 3)
     data_list = [os.path.join(traj_dir, "20220928-050000MA", "trajectory_0.csv"), os.path.join(traj_dir, "20220928-050000MA", "trajectory_0.csv")]
-    data_list = ["/Users/dogawa/Desktop/Code/ImageLinkRCM/debug/data/movie/trajectory_0.csv"]
+    data_list = [os.path.join(traj_dir, "trajectory_0.csv")]
     traj_data = MeshTraj(data_list, mnw_data, time_resolution=1.0)
 
     print(len(traj_data))

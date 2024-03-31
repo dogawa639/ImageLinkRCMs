@@ -75,7 +75,7 @@ class ViTEnc(nn.Module):
         super().__init__()
         if type(patch_size) is int:
             patch_size = (3, patch_size, patch_size)
-        self.patch_size = patch_size  #(c, h, w)
+        self.patch_size = patch_size  # (c, h, w)
         self.emb_dim = emb_dim
         self.sln = sln
         self.w_dim = w_dim
@@ -93,7 +93,6 @@ class ViTEnc(nn.Module):
         else:
             self.norm1 = nn.LayerNorm(self.mid_dim)
             self.norm2 = nn.LayerNorm(emb_dim)
-
 
     def forward(self, x, w=None, source_i=0):
         # x: (bs2, mid_dim) or (mid_dim)
@@ -121,7 +120,7 @@ class ViTEnc(nn.Module):
             x = x.squeeze(0)
         return x
 
-    def compress(self, patch, num_source=1):
+    def compress(self, patch, num_source=0):
         # satellite: (bs2, c, h, width) or (c, h, width)
         if patch.dim() == 3:
             patch = patch.unsqueeze(0)  # (1, c, h, w)

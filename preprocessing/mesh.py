@@ -2,6 +2,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import shapely
+import geopandas as gpd
+
 import scipy
 from scipy import sparse
 from scipy.sparse import csr_matrix, coo_matrix
@@ -49,6 +52,9 @@ class Cell:
             self.prop[prop_dim] -= 1
         else:
             raise ValueError("prop_dim must be positive or 0")
+
+    def get_geometry(self):
+        return shapely.geometry.box(self.x_min, self.y_min, self.x_max, self.y_max)
 
     @property
     def center(self):
@@ -108,7 +114,7 @@ class MeshNetwork:
             x_idx = int((points[0] - self.coords[0]) / self.x_size)
             y_idx = int((points[1] - self.coords[1]) / self.y_size)
             return (y_idx, x_idx)
-        elif type(points) == np.ndarray:
+        else:
             x_idx = ((points[:, 0] - self.coords[0]) / self.x_size).astype(int)
             y_idx = ((points[:, 1] - self.coords[1]) / self.y_size).astype(int)
             return np.array([[y_idx[i], x_idx[i]] if contained[i] else None for i in
@@ -145,6 +151,16 @@ class MeshNetwork:
             center_coords = self.center_coords.reshape(-1, 2)
             angles = np.array([self.get_angle(tuple(point), center_coords).reshape(self.h_dim, self.w_dim) for point in points])   # (num_points, h_dim,  w_dim)
             return angles
+
+    def load_prop(self, npy_path):
+        prop_array = np.load(npy_path)
+        if prop_array.shape[0] > self.prop_dim:
+            prop_array = prop_array[:self.prop_dim]
+        elif prop_array.shape[0] < self.prop_dim:
+            prop_array = np.concatenate([prop_array, np.zeros((self.prop_dim - prop_array.shape[0], self.h_dim, self.w_dim))], axis=0)
+        for i in range(self.h_dim):
+            for j in range(self.w_dim):
+                self.cells[i][j].prop = prop_array[:, i, j]
 
     def add_prop(self, points, prop_dims):
         # points: np.array([[x1, y1], [x2, y2], ...])
@@ -234,8 +250,8 @@ class MeshNetwork:
         # return: (num_points, 2) or tuple
         if type(idxs) == tuple:
             return self.cells[idxs[0]][idxs[1]].center
-        elif type(idxs) == np.ndarray:
-            return np.array(self.cells[idxs[i, 0]][idxs[i, 1]].center for i in range(len(idxs)))
+        else:
+            return np.array([self.cells[idxs[i, 0]][idxs[i, 1]].center for i in range(len(idxs))])
 
     def clear_prop(self, prop_dim):
         for i in range(self.h_dim):
@@ -308,6 +324,19 @@ class MeshNetwork:
         ax.quiver(x, y, u, v, angles='xy', scale_units='xy', scale=1, color="red")
         plt.show()
 
+    def write_geo_file(self, utf_num, file_path):
+        # utf_num: int
+        geometries = []
+        properties = []
+        for i in range(self.h_dim):
+            for j in range(self.w_dim):
+                geom = self.cells[i][j].get_geometry()
+                prop = self.cells[i][j].prop
+                geometries.append(geom)
+                properties.append(prop.tolist())
+        gdf = gpd.GeoDataFrame(properties, geometry=geometries, crs=f"EPSG:{2442+utf_num}")
+        gdf.to_file(file_path)
+
     @staticmethod
     def get_angle(start_point, end_points):
         # start_point: (x, y)
@@ -336,7 +365,7 @@ class MeshNetwork:
         dy = idx2[0] - idx1[0]
         dx = idx2[1] - idx1[1]
         idx1 = [*idx1]; idx2 = [*idx2]
-        path = [idx1]
+        path = [[*idx1]]
         while dx != 0 or dy != 0:
             if abs(dx) > abs(dy):
                 idx1[1] += np.sign(dx)
@@ -347,7 +376,7 @@ class MeshNetwork:
                 idx1[1] += np.sign(dx)
             dx = idx2[1] - idx1[1]
             dy = idx2[0] - idx1[0]
-            path.append(idx1)
+            path.append([*idx1])
         return np.array(path)
 
 

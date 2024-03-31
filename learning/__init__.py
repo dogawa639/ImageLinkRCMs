@@ -1,1 +1,1 @@
-__all__ = ["airl", "discriminator", "encoder", "generator", "w_encoder", "util"]
+__all__ = ["airl", "mesh_airl", "mesh_airl_static", "discriminator", "encoder", "generator", "w_encoder", "util"]
