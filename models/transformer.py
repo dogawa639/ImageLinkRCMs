@@ -60,7 +60,7 @@ class MultiHeadAttention(nn.Module):
                     logits = logits * mask
                 else:
                     logits = logits * mask.unsqueeze(-2)
-            logits = torch.where(logits != 0, logits, torch.full_like(logits, -9e15))
+            logits = torch.where(logits != 0, logits, tensor(-9e15, dtype=logits.dtype, device=logits.device))
             atten = F.softmax(logits, dim=-1)  # (*, input_channel, source_channel)
             if atten_agg is None:
                 atten_agg = atten.clone().detach() / self.num_head
@@ -82,7 +82,7 @@ class MultiHeadAttention(nn.Module):
         if self.atten_fn == "matmul":
             logits = torch.matmul(in_q, in_k.transpose(-2, -1)) / (in_k.shape[-2] ** 0.5)
         elif self.atten_fn == "dense":
-            f1 = self.dense_atten[head](in_q) # (*, input_channel, 1)
+            f1 = self.dense_atten[head](in_q)  # (*, input_channel, 1)
             f2 = self.dense_atten[head](in_k).squeeze(-1).unsqueeze(-2)  # (*, 1, source_channel)
             logits = f1 + f2
         return logits

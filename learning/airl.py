@@ -440,7 +440,7 @@ class AIRL:
         else:
             input, mask, next_link, _ = batch
         f_val = self.discriminator(input, pi, i=i, w=w)
-        f_val_masked = torch.where(mask > 0.99, f_val, torch.zeros_like(f_val))
+        f_val_masked = torch.where(mask > 0.99, f_val, tensor(0.0, dtype=torch.float32, device=f_val.device))
         f_val_clone_masked = f_val_masked.clone().detach()
         pi = torch.where(mask > 0.99, pi[:, i, :, :], tensor(0.0, dtype=torch.float32, device=pi.device))
         pi_i_clone = pi.clone().detach()

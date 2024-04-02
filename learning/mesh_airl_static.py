@@ -59,11 +59,12 @@ class MeshAIRLStatic:
 
         dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle, "drop_last": True}
 
-
+        print(f"Split dataset into train({train_ratio}) and val({1 - train_ratio})")
         dataset_train, dastaset_val = self.dataset.split_into((train_ratio, 1 - train_ratio))
         dataloaders_train = [DataLoader(dataset_tmp, **dataset_kwargs) for dataset_tmp in dataset_train.get_sub_datasets()]  # [MeshDatasetStaticSub] len: channel
         dataloaders_val = [DataLoader(dataset_tmp, **dataset_kwargs) for dataset_tmp in dastaset_val.get_sub_datasets()]  # [MeshDatasetStaticSub] len: channel
 
+        print("Training starts.")
         min_criteria = 1e10
         for e in range(epochs):
             t1 = time.perf_counter()
@@ -258,6 +259,7 @@ class MeshAIRLStatic:
         if image_file is not None:
             log.save_fig(image_file)
         log.close()
+        print("Training ends.")
 
     def test_models(self, conf_file, dataset, image_file=None):
         print("test start.")

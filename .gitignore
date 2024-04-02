@@ -24,3 +24,6 @@ cache/
 /.idea
 .DS_Store
 .vscode
+
+# note for developer
+todo.md

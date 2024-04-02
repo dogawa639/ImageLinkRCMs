@@ -242,7 +242,7 @@ class PPEmbedDataset(Dataset):
 
     def get_fake_batch(self, real_batch, g_output):
         mask = real_batch[1]
-        g_output = torch.where(mask > 0, g_output, torch.full_like(g_output, -9e15))  # (trip_num, link_num, link_num)
+        g_output = torch.where(mask > 0, g_output, tensor(-9e15, dtype=torch.float32, device=g_output.device))  # (trip_num, link_num, link_num)
         next_link_prob = F.softmax(g_output, dim=-1)
         next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()  # (trip_num * link_num)
         next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
