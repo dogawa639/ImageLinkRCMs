@@ -78,7 +78,7 @@ if __name__ == "__main__":
     IMAGE = False
     USESMALL = True
     TRAIN = True
-    TEST = False
+    TEST = True
 
     # instance creation
     output_channel = len(pp_path)
@@ -88,11 +88,13 @@ if __name__ == "__main__":
     dx, dy = (bb_coords[2] - bb_coords[0]),  (bb_coords[3] - bb_coords[1])
     w_dim,  h_dim = int(dx / mesh_dist), int(dy / mesh_dist)
 
+    print("Create MeshNetwork object")
     mnw_data = MeshNetwork(bb_coords, w_dim, h_dim, 3)  # prop_dim: prop from one_hot image
 
     # main process
     if IMAGE:
         # split image into mesh
+        print("Split image into mesh")
         image_data = SatelliteImageData(image_data_path, resolution=0.5,
                                         output_data_file=os.path.join(mesh_image_dir,
                                                                       "satellite_image_processed.json"))
@@ -102,23 +104,28 @@ if __name__ == "__main__":
                                                                     "onehot_image_processed.json"))
         onehot_data.split_by_mesh(mnw_data, mesh_image_dir, patch_size=128, aggregate=True)
 
+    print("Load MeshNetwork property")
     mnw_data.load_prop(os.path.join(mesh_image_dir, "landuse", "aggregated.npy"))
 
     # load mesh base pp data
+    print("Load MeshTrajectoryStatic object")
     pp_path_small = [pp_path[i].replace(".csv", "_small.csv") for i in range(len(pp_path))]
     if USESMALL:
         mesh_traj_data = MeshTrajStatic(pp_path_small, mnw_data)
     else:
-        mesh_traj_data = MeshTrajStatic(pp_path, mnw_data, pp_path_small)
+        mesh_traj_data = MeshTrajStatic(pp_path, mnw_data, pp_path_small)  # write down the trimmed data into the pp_path_small
+    print(f"Split dataset into train & val ({train_ratio / 10}) and test ({(1 - train_ratio) / 10})")
     mesh_traj_train, mesh_traj_test = mesh_traj_data.split_into((train_ratio / 10, (1 - train_ratio) / 10))
     dataset_train = MeshDatasetStatic(mesh_traj_train, 1)
     dataset_test = MeshDatasetStatic(mesh_traj_test, 1)
 
     # load satellite image data
+    print("Load MeshImageData object")
     image_data = MeshImageData(os.path.join(mesh_image_dir, "satellite_image_processed.json"), mnw_data, img_shapes=[(3, patch_size, patch_size)])
 
     # load models
     # model_names : [str] [discriminator, generator]
+    print("Load models")
     model_names = ["UNetDisStatic", "UNetGen"]
 
     kwargs = {
@@ -144,12 +151,16 @@ if __name__ == "__main__":
             encoders.append(get_models(model_names, **kwargs)[0])
 
     # create airl object and perform train and test
+    print("Create MeshAIRLStatic object")
     airl = MeshAIRLStatic(generators, discriminators, dataset_train, model_dir,
                  image_data=image_data, encoders=encoders, hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, device=device)
 
     if TRAIN:
+        print("Training start")
         airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
 
     if TEST:
+        print("Testing start")
         airl.load()
         airl.test_models(CONFIG, dataset_test)
+    print("Program ends.")

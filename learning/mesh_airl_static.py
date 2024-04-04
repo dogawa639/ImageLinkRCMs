@@ -168,6 +168,7 @@ class MeshAIRLStatic:
                 tn = 0.0
                 fn = 0.0
                 bs_all = 0
+                showval = 5
                 for state, context, next_state, mask, idx in dataloaders_val[channel]:  # batch
                     # state: (bs, prop_dim, 2d+1, 2d+1)
                     # context: (bs, context_num, 2d+1, 2d+1)
@@ -212,7 +213,13 @@ class MeshAIRLStatic:
                     mode_loss_g_val.append(loss_g.clone().detach().cpu().item())
                     mode_loss_d_val.append(loss_d.clone().detach().cpu().item())
 
-                    ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(inputs, pi_other, next_state, mask, channel)
+                    if e % 10 == 0:
+                        # show intermediate result samples
+                        ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(inputs, pi_other, next_state,
+                                                                                          mask, channel, showval=showval)
+                        showval = 0
+                    else:
+                        ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(inputs, pi_other, next_state, mask, channel)
                     ll += ll_tmp.detach().cpu().item()
                     dist += d_tmp.detach().cpu().numpy().sum()
                     tp += tp_tmp.detach().cpu().item()
@@ -267,9 +274,11 @@ class MeshAIRLStatic:
 
         epoch_accuracy = []
         epoch_ll = []
+        epoch_ll0 = []
         epoch_dist = []
         epoch_criteria = []
         epoch_bs = []
+        epoch_bs_count = []
         dataloaders_test = [DataLoader(dataset_tmp, **dataset_kwargs) for dataset_tmp in
                              dataset.get_sub_datasets()]  # [MeshDatasetStaticSub] len: channel
 
@@ -286,6 +295,8 @@ class MeshAIRLStatic:
             fn = 0.0
             ll0 = 0.0
             bs_all = 0
+            bs_count = 0
+            showval = 3
             for state, context, next_state, mask, idx in dataloaders_test[channel]:  # batch
                 # state: (bs, prop_dim, 2d+1, 2d+1)
                 # context: (bs, context_num, 2d+1, 2d+1)
@@ -332,25 +343,30 @@ class MeshAIRLStatic:
                 mode_loss_d.append(loss_d.clone().detach().cpu().item())
 
                 ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(inputs, pi_other, next_state, mask,
-                                                                                  channel)
+                                                                                  channel, showval=showval)
+                showval = 0
+
                 ll += ll_tmp.detach().cpu().item()
                 dist += d_tmp.detach().cpu().numpy().sum()
                 tp += tp_tmp.detach().cpu().item()
                 fp += fp_tmp.detach().cpu().item()
                 tn += tn_tmp.detach().cpu().item()
                 fn += fn_tmp.detach().cpu().item()
-                ll0 += (log_d_g[0] * next_state).sum().detach().cpu().item()
+                ll0 -= torch.log(mask.sum(dim=(1, 2))).sum().detach().cpu().item()
                 bs_all += state.shape[0]
+                bs_count += 1
             accuracy = (tp + tn) / (tp + fp + tn + fn)
             criteria = dist
             epoch_accuracy.append(accuracy)
             epoch_ll.append(ll)
+            epoch_ll0.append(ll0)
             epoch_dist.append(dist)
             epoch_criteria.append(criteria)
             epoch_bs.append(bs_all)
+            epoch_bs_count.append(bs_count)
 
         for i in range(self.output_channel):
-            print(f"channel {i}: accuracy: {epoch_accuracy[i]}, ll: {epoch_ll[i]}, dist: {epoch_dist[i]}, criteria: {epoch_criteria[i]}, bs: {epoch_bs[i]}")
+            print(f"channel {i}: accuracy: {epoch_accuracy[i]}, ll: {epoch_ll[i]} (Ave. {epoch_ll[i] / epoch_bs[i]}), ll0: {epoch_ll0[i]}, dist: {epoch_dist[i]}, criteria: {epoch_criteria[i]}, total_row: {epoch_bs[i]}, bs: {epoch_bs[i] / epoch_bs_count[i]}")
 
         print("test end.")
 
@@ -391,7 +407,7 @@ class MeshAIRLStatic:
 
         return (log_d_g, log_1_d_g), (log_d_d, log_1_d_d)
 
-    def get_creteria(self, inputs, pi_other, next_state, mask, i):
+    def get_creteria(self, inputs, pi_other, next_state, mask, i, showval=0):
         # ll, TP, FP, FN, TN: scalar
         # f_val, util, val: (bs, 2d+1, 2d+1)
         # ext: (bs, num_agents, 2d+1, 2d+1)
@@ -400,6 +416,9 @@ class MeshAIRLStatic:
         q = torch.where(mask > 0, q, tensor(-9e15, dtype=torch.float32, device=q.device))
         # choose maximum q
         pi_q = F.softmax(q.view(q.shape[0], -1), dim=-1)  # (bs, (2*d+1)^2)
+        logits = self.generators[i](inputs).reshape(inputs.shape[0], -1)  # (bs, (2*d+1)^2)
+        pi_g = F.softmax(logits, dim=-1)  # (bs, (2*d+1)^2)
+
         ll = log((pi_q.reshape(*q.shape) * next_state).sum(dim=-1)).sum()
 
         pred_state = (pi_q == pi_q.max(dim=1, keepdim=True)[0]).reshape(*q.shape).to(torch.float32)  # (bs, 2d+1, 2d+1)
@@ -422,6 +441,27 @@ class MeshAIRLStatic:
         fp = (mask * (1 - next_state) * pred_state).sum()
         tn = (mask * (1 - next_state) * (1 - pred_state)).sum()
         fn = (next_state * (1 - pred_state)).sum()
+
+        # plot figures
+        if showval > 0:
+            showval = min(inputs.shape[0], showval)
+            fig = plt.figure(figsize=(4, 1 * showval))
+            for j in range(showval):
+                ax = fig.add_subplot(showval, 4, j * 4 + 1)  # pi_q, pi_g, next_state, mask
+                ax.imshow(pi_q[j].reshape(*q.shape[1:]).detach().cpu().numpy(), cmap="gray")
+                ax.set_title(f"Pi_q {j}")
+                ax = fig.add_subplot(showval, 4, j * 4 + 2)
+                ax.imshow(pi_g[j].reshape(*q.shape[1:]).detach().cpu().numpy(), cmap="gray")
+                ax.set_title(f"Pi_g {j}")
+                ax = fig.add_subplot(showval, 4, j * 4 + 3)
+                ax.imshow(next_state[j].detach().cpu().numpy(), cmap="gray")
+                ax.set_title(f"Next_state {j}")
+                ax = fig.add_subplot(showval, 4, j * 4 + 4)
+                ax.imshow(mask[j].detach().cpu().numpy(), cmap="gray")
+                ax.set_title(f"Mask {j}")
+            plt.tight_layout()
+            plt.pause(0.1)
+
         return ll, d_total, tp, fp, tn, fn
 
     def get_pi_from_logits(self, logits):
