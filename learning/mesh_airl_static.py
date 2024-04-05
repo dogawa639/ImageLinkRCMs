@@ -52,6 +52,7 @@ class MeshAIRLStatic:
                      train_ratio=0.8, d_epoch=5, image_file=None):
         log = Logger(os.path.join(self.model_dir, "log.json"), conf_file,
                      figsize=(6.4, 4.8 * 3))  # loss_g,loss_d,loss_g_val,loss_d_val,accuracy,ll,criteria
+        epsilon = 0.0
 
         optimizer_gs = [optim.Adam(self.generators[i].parameters(), lr=lr_g) for i in range(self.output_channel)]
         optimizer_ds = [optim.Adam(self.discriminators[i].parameters(), lr=lr_d) for i in range(self.output_channel)]
@@ -121,7 +122,7 @@ class MeshAIRLStatic:
 
                     for j in range(d_epoch):
                         # loss function calculation
-                        next_state_epsilon = torch.full_like(next_state, 1e-3)
+                        next_state_epsilon = torch.full_like(next_state, epsilon)
                         next_state_epsilon = torch.where(next_state == 0, next_state_epsilon,
                                                          tensor(1.0, dtype=torch.float32,
                                                                 device=next_state_epsilon.device))
@@ -200,7 +201,7 @@ class MeshAIRLStatic:
                     pi_other = torch.cat([self.get_pi_from_logits(logits_tmp).unsqueeze(1) for logits_tmp in logits_other], dim=1)  # detached
 
                     # loss function calculation
-                    next_state_epsilon = torch.full_like(next_state, 1e-3)
+                    next_state_epsilon = torch.full_like(next_state, epsilon)
                     next_state_epsilon = torch.where(next_state == 0, next_state_epsilon,
                                                      tensor(1.0, dtype=torch.float32,
                                                             device=next_state_epsilon.device))
@@ -271,6 +272,7 @@ class MeshAIRLStatic:
     def test_models(self, conf_file, dataset, image_file=None):
         print("test start.")
         dataset_kwargs = {"batch_size": 16, "shuffle": False, "drop_last": True}
+        epsilon = 0.0
 
         epoch_accuracy = []
         epoch_ll = []
@@ -299,6 +301,7 @@ class MeshAIRLStatic:
             showval = 3
             for state, context, next_state, mask, idx in dataloaders_test[channel]:  # batch
                 # state: (bs, prop_dim, 2d+1, 2d+1)
+
                 # context: (bs, context_num, 2d+1, 2d+1)
                 # next_state: (bs, 2d+1, 2d+1), 0 or 1
                 # mask: (bs, 2d+1, 2d+1), 0 or 1
@@ -329,7 +332,7 @@ class MeshAIRLStatic:
                                      dim=1)  # detached
 
                 # loss function calculation
-                next_state_epsilon = torch.full_like(next_state, 1e-3)
+                next_state_epsilon = torch.full_like(next_state, epsilon)
                 next_state_epsilon = torch.where(next_state == 0, next_state_epsilon,
                                                  tensor(1.0, dtype=torch.float32,
                                                         device=next_state_epsilon.device))
@@ -399,11 +402,17 @@ class MeshAIRLStatic:
         f_val_masked = f_val * mask
         f_val_clone_masked = f_val_masked.clone().detach()
         pi_clone = pi.clone().detach()
-        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi)) * pi_clone
-        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi)) * pi_clone
+
+        next_idxs = torch.multinomial(pi_clone.view(pi_clone.shape[0], -1), 1).squeeze(dim=1)  # (bs)
+        next_state_fake = torch.zeros_like(next_state).view(next_state.shape[0], -1)
+        next_state_fake[torch.arange(next_state.shape[0]), next_idxs] = 1.0
+        next_state_fake = next_state_fake.view(next_state.shape)
+
+        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi)) * next_state_fake
+        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi)) * next_state_fake
 
         log_d_d = (f_val_masked - log(torch.exp(f_val_masked) + pi_clone)) * next_state
-        log_1_d_d = (log(pi_clone) - log(torch.exp(f_val_masked) + pi_clone)) * pi_clone
+        log_1_d_d = (log(pi_clone) - log(torch.exp(f_val_masked) + pi_clone)) * next_state_fake
 
         return (log_d_g, log_1_d_g), (log_d_d, log_1_d_d)
 
@@ -416,8 +425,9 @@ class MeshAIRLStatic:
         q = torch.where(mask > 0, q, tensor(-9e15, dtype=torch.float32, device=q.device))
         # choose maximum q
         pi_q = F.softmax(q.view(q.shape[0], -1), dim=-1)  # (bs, (2*d+1)^2)
-        logits = self.generators[i](inputs).reshape(inputs.shape[0], -1)  # (bs, (2*d+1)^2)
-        pi_g = F.softmax(logits, dim=-1)  # (bs, (2*d+1)^2)
+        logits = self.generators[i](inputs)  # (bs, 2*d+1, 2*d+1)
+        logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32, device=logits.device))
+        pi_g = F.softmax(logits.reshape(inputs.shape[0], -1), dim=-1)  # (bs, (2*d+1)^2)
 
         ll = log((pi_q.reshape(*q.shape) * next_state).sum(dim=-1)).sum()
 

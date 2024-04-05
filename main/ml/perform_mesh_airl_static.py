@@ -75,9 +75,9 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    IMAGE = True
+    IMAGE = False
     USESMALL = True
-    TRAIN = True
+    TRAIN = False
     TEST = True
 
     # instance creation
