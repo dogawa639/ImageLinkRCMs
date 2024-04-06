@@ -12,6 +12,7 @@
 *.mov
 data/
 /trained_models
+output/
 
 # cache
 __pycache__

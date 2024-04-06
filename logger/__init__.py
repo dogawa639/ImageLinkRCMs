@@ -7,10 +7,12 @@ import matplotlib.pyplot as plt
 
 from utility import *
 
+
 class Logger:
-    def __init__(self, json_file, conf_file, figsize=(6.4, 4.8)):
+    def __init__(self, json_file, conf_file, fig_file=None, figsize=(6.4, 4.8)):
         self.json_file = json_file
         self.conf_file = conf_file
+        self.fig_file = fig_file
 
         self.start_time = datetime.datetime.now()
         self.data = {
@@ -27,7 +29,8 @@ class Logger:
         self.data["duration"] = str(self.end_time - self.start_time)
 
         dump_json(self.data, self.json_file)
-        plt.show()
+        self.show_fig()
+        input("Logger has been closed. Press Enter to continue...")
         self.closed = True
 
     def add_log(self, key, value):
@@ -77,7 +80,7 @@ class Logger:
                 ax.plot(v_list[i], label=label_list[i])
             ax.legend()
             ax.set_ylabel(f"{label_list[i]}")
-        plt.pause(0.01)
+        self.show_fig()
 
     def add_prop(self, key, value):
         self.data[key] = value
@@ -116,7 +119,14 @@ class Logger:
             ax.legend()
             ax.set_ylabel(f"{label_list[i]}")
         plt.savefig(out_path)
-        plt.show()
+        self.show_fig()
+
+    def show_fig(self):
+        if self.fig_file is None:
+            plt.pause(0.01)
+        else:
+            plt.figure(self.fig.number)
+            plt.savefig(self.fig_file)
 
 
 

@@ -50,7 +50,7 @@ class MeshAIRLStatic:
 
     def train_models(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
                      train_ratio=0.8, d_epoch=5, image_file=None):
-        log = Logger(os.path.join(self.model_dir, "log.json"), conf_file,
+        log = Logger(os.path.join(self.model_dir, "log.json"), conf_file, fig_file=os.path.join(self.model_dir, "log.png"),
                      figsize=(6.4, 4.8 * 3))  # loss_g,loss_d,loss_g_val,loss_d_val,accuracy,ll,criteria
         epsilon = 0.0
 
@@ -470,7 +470,7 @@ class MeshAIRLStatic:
                 ax.imshow(mask[j].detach().cpu().numpy(), cmap="gray")
                 ax.set_title(f"Mask {j}")
             plt.tight_layout()
-            plt.pause(0.1)
+            plt.savefig(os.path.join(self.model_dir, f"creteria{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png"))
 
         return ll, d_total, tp, fp, tn, fn
 

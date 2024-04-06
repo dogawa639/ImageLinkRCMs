@@ -1,6 +1,7 @@
 if __name__ == "__main__":
     import configparser
     import json
+    import datetime
     import os
 
     import geopandas as gpd
@@ -35,9 +36,6 @@ if __name__ == "__main__":
     image_data_path = read_data["image_data_path"]
     onehot_data_path = read_data["onehot_data_path"]
     mesh_image_dir = read_data["mesh_image_dir"]
-    # save
-    read_save = config["SAVE"]
-    figure_dir = read_save["figure_dir"]
 
     # train setting
     read_train = config["TRAIN"]
@@ -71,14 +69,23 @@ if __name__ == "__main__":
 
     # save setting
     read_save = config["SAVE"]
-    model_dir = read_save["model_dir"]
+    output_dir = read_save["output_dir"]
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
     IMAGE = False
     USESMALL = True
+    ADDOUTPUT = True
     TRAIN = True
     TEST = True
+
+    # add datetime to output_dir
+    if ADDOUTPUT:
+        output_dir = os.path.join(output_dir, datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        else:
+            raise Exception("Output directory already exists.")
 
     # instance creation
     output_channel = len(pp_path)
@@ -152,7 +159,7 @@ if __name__ == "__main__":
 
     # create airl object and perform train and test
     print("Create MeshAIRLStatic object")
-    airl = MeshAIRLStatic(generators, discriminators, dataset_train, model_dir,
+    airl = MeshAIRLStatic(generators, discriminators, dataset_train, output_dir,
                  image_data=image_data, encoders=encoders, hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, device=device)
 
     if TRAIN:
