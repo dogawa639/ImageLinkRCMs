@@ -77,7 +77,7 @@ if __name__ == "__main__":
 
     IMAGE = False
     USESMALL = True
-    TRAIN = False
+    TRAIN = True
     TEST = True
 
     # instance creation
