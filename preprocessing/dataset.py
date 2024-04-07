@@ -342,7 +342,7 @@ class MeshDataset(Dataset):
                 self.next_state[cnt, next_y, next_x] = 1
                 self.aids[cnt] = aids[channel][j]
                 # add other agents at the same time
-                self.mask[cnt, min_y_local:max_y_local, min_x_local:max_x_local] = 1.0#tensor(self.common_state[:, min_y:max_y, min_x:max_x].sum(axis=0) == 0)
+                self.mask[cnt, min_y_local:max_y_local, min_x_local:max_x_local] = 1.0  #tensor(self.common_state[:, min_y:max_y, min_x:max_x].sum(axis=0) == 0)
                 for channel_tmp in range(self.output_channel):
                     for j2 in range(idxs[channel_tmp].shape[0]):  # num_agents
                         if channel_tmp == channel and j2 == j:
@@ -463,8 +463,8 @@ class MeshDatasetStatic:
             self.state[channel] = (self.state[channel] - 0.05) / 0.1
             self.context[channel] = (self.context[channel] - 300) / 150
             print(f"MeshDatasetStatic initialize: channel: {channel}, cnt: {cnt}")
-            print(f"  Mean  state: {self.state[channel].mean()}, context: {self.context[channel].mean()}")
-            print(f"  Std   state: {self.state[channel].std()}, context: {self.context[channel].std()}")
+            print(f"  Mean  state: {self.state[channel].mean(dim=(0, 2, 3))}, context: {self.context[channel].mean(dim=(0, 2, 3))}")
+            print(f"  Std   state: {self.state[channel].std(dim=(0, 2, 3))}, context: {self.context[channel].std(dim=(0, 2, 3))}")
 
 
 class MeshDatasetStaticSub(Dataset):

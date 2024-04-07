@@ -30,7 +30,8 @@ class ViT(nn.Module):
 
         self.to_patch_embedding = nn.Sequential(
             nn.LayerNorm(patch_dim),
-            nn.Linear(patch_dim, dim),
+            #nn.Linear(patch_dim, dim),
+            FF(patch_dim, dim),
             nn.LayerNorm(dim)
         )
 

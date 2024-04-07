@@ -455,22 +455,35 @@ class MeshAIRLStatic:
         # plot figures
         if showval > 0:
             showval = min(inputs.shape[0], showval)
-            fig = plt.figure(figsize=(4, 1 * showval))
+            fig = plt.figure(figsize=(8, 1 * showval))
+            showprop = 4
+            col = 4 + showprop
             for j in range(showval):
-                ax = fig.add_subplot(showval, 4, j * 4 + 1)  # pi_q, pi_g, next_state, mask
+                ax = fig.add_subplot(showval, col, j * col + 1)  # pi_q, pi_g, next_state, mask
                 ax.imshow(pi_q[j].reshape(*q.shape[1:]).detach().cpu().numpy(), cmap="gray")
                 ax.set_title(f"Pi_q {j}")
-                ax = fig.add_subplot(showval, 4, j * 4 + 2)
+                ax.set_xticks([]); ax.set_yticks([])
+                ax = fig.add_subplot(showval, col, j * col + 2)
                 ax.imshow(pi_g[j].reshape(*q.shape[1:]).detach().cpu().numpy(), cmap="gray")
                 ax.set_title(f"Pi_g {j}")
-                ax = fig.add_subplot(showval, 4, j * 4 + 3)
+                ax.set_xticks([]); ax.set_yticks([])
+                ax = fig.add_subplot(showval, col, j * col + 3)
                 ax.imshow(next_state[j].detach().cpu().numpy(), cmap="gray")
                 ax.set_title(f"Next_state {j}")
-                ax = fig.add_subplot(showval, 4, j * 4 + 4)
+                ax.set_xticks([]); ax.set_yticks([])
+                ax = fig.add_subplot(showval, col, j * col + 4)
                 ax.imshow(mask[j].detach().cpu().numpy(), cmap="gray")
                 ax.set_title(f"Mask {j}")
+                ax.set_xticks([]); ax.set_yticks([])
+                for k in range(showprop):
+                    ax = fig.add_subplot(showval, col, j * col + 5 + k)
+                    ax.imshow(inputs[j, k].detach().cpu().numpy(), cmap="gray")
+                    ax.set_title(f"Prop {k} {j}")
+                    ax.set_xticks([]); ax.set_yticks([])
             plt.tight_layout()
             plt.savefig(os.path.join(self.model_dir, f"creteria{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png"))
+            plt.clf()
+            plt.close()
 
         return ll, d_total, tp, fp, tn, fn
 
@@ -504,6 +517,11 @@ class MeshAIRLStatic:
                     img_feature = torch.cat((img_feature, tmp_feature), dim=0)  # [tensor(bs, emb_dim, 2d+1, 2d+1)]
                     other_feature = [torch.cat((other_feature[i], tmp_other_feature[i]), dim=0) for i in range(len(other_feature))]  # [tensor(bs, emb_dim, 2d+1, 2d+1)]
         if img_feature is not None:
+            print_prop = False
+            if print_prop:
+                print(f"state  dim: {state.shape[1]}, mean: {state.mean(dim=(0, 2, 3)).clone().detach().cpu().numpy().tolist()}, std: {state.std(dim=(0, 2, 3)).clone().detach().cpu().numpy().tolist()}")
+                print(f"context  dim: {context.shape[1]}, mean: {context.mean(dim=(0, 2, 3)).clone().detach().cpu().numpy().tolist()}, std: {context.std(dim=(0, 2, 3)).clone().detach().cpu().numpy().tolist()}")
+                print(f"img_feature  dim: {img_feature.shape[1]}, mean: {img_feature.mean(dim=(0, 2, 3)).clone().detach().cpu().numpy().tolist()}, std: {img_feature.std(dim=(0, 2, 3)).clone().detach().cpu().numpy().tolist()}")
             return torch.cat((state, context, img_feature), dim=1), [torch.cat((state, torch.zeros_like(context), other_feature[i]), dim=1) for i in range(len(other_feature))]
         else:
             return torch.cat((state, context), dim=1), [torch.cat((state, torch.zeros_like(context)), dim=1) for _ in range(self.output_channel)]
