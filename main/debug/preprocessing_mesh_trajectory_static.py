@@ -14,7 +14,7 @@ if __name__ == "__main__":
     read_data = config["DATA"]
     data_dir = read_data["data_dir"]
 
-    GEOFILE = True
+    GEOFILE = False
     TRAJECTORY = True
 
     mnw_data = MeshNetwork((-68323.3, 92969.9, -67567.6, 93532.6), 40, 20, 0)

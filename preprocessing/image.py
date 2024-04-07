@@ -180,11 +180,14 @@ class MeshImageData:
         if i < 0 or i >= self.h_dim * self.w_dim:
             return [torch.zeros(self.img_shapes[idx], dtype=torch.float32, requires_grad=False) for idx in range(len(self.data_list))]
         res = []
-        for j in range(len(self.data_list)):
-            res.append(self.data_all[j][i])
+        for idx in range(len(self.data_list)):
+            res.append(self.data_all[idx][i])
         return res
 
     def load_mesh_images(self, i, j=None, d=0):
+        if j is None:
+            j = i % self.w_dim
+            i = i // self.w_dim
         res = [None for _ in range(len(self.data_list))]  # [tensor((2 * d +1)^2, c, h, w)] len: len(self.data_list)
         for di in range(-d, d+1):
             for dj in range(-d, d+1):
@@ -193,7 +196,7 @@ class MeshImageData:
                 for k, img in enumerate(imgs):
                     if res[k] is None and img is not None:
                         res[k] = torch.zeros(((2 * d + 1) ** 2, *img.shape), dtype=torch.float32, requires_grad=False)
-                    elif img is not None:
+                    if img is not None:
                         res[k][idx] = img
         return res
 
@@ -219,6 +222,10 @@ class MeshImageData:
                             self.data_all.append([None])
                         else:
                             self.data_all[idx].append(None)
+            print("MeshImageData is loaded.")
+            print(f"  Data {idx} shape: {self.img_shapes[idx]}")
+            cated = torch.cat([img.unsqueeze(0) for img in self.data_all[idx] if img is not None], 0)
+            print(f"  Data {idx} mean: {cated.mean(dim=(0, 2, 3))}, std: {cated.std(dim=(0, 2, 3))}")
 
 
 # 画像データの読み込み，座標付与

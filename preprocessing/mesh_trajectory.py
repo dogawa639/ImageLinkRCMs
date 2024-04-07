@@ -230,7 +230,7 @@ class MeshTrajStatic:
         self._set_mesh_idxs()  # set mesh transition data for each agent  ["ID", "y_idx", "x_idx", "y_idx_next", "x_idx_next", "d_x", "d_y"]
 
         for i in range(len(data_list)):
-            print("MeshTrajStatic {}: data_list num: {} (idx_num: {}), agent_num: {}".format(i, len(self.data_list[i]), len(self.mesh_idxs[i]), len(np.unique(self.data_list[i]["ID"].values))))
+            print("MeshTrajStatic {}: data_list num: {} (mesh_idx_num: {}), agent_num: {}".format(i, len(self.data_list[i]), len(self.mesh_idxs[i]), len(np.unique(self.data_list[i]["ID"].values))))
 
     def get_trip_nums(self):
         return np.array([len(data) for data in self.mesh_idxs])
@@ -265,12 +265,18 @@ class MeshTrajStatic:
         data = self.mesh_idxs[channel][self.mesh_idxs[channel]["ID"] == aid]
         return np.concatenate([data[["y_idx", "x_idx"]].values, data[["y_idx_next", "x_idx_next"]].values[[-1], :]], axis=0)  # (num_points, 2)
 
+    def get_xy_one_agent(self, channel, aid):
+        target = self.data_list[channel][self.data_list[channel]["ID"] == aid]  # [ID, x, y, time]
+        target = target.sort_values("time")
+        return target[["x", "y"]].values
+
     # visualize
     def show_traj(self, channel, aid, save_path=None):
         fig = plt.figure()
         ax = fig.add_subplot(1, 1, 1)
         ax.set_title(f"Trajectory channel {channel}, agent {aid}")
         ax.set_aspect('equal')
+        # quiver plot of mesh center
         idxs = self.get_traj_idx_one_agent(channel, aid)
         center_points = self.mnw_data.get_center_points(idxs)
         x = center_points[:, 0]
@@ -278,6 +284,10 @@ class MeshTrajStatic:
         u = np.diff(x)
         v = np.diff(y)
         ax.quiver(x[:-1], y[:-1], u, v, angles='xy', scale_units='xy', scale=1, color="red")
+        # scatter plot of trajectory
+        coords = self.get_xy_one_agent(channel, aid)
+        ax.scatter(coords[:, 0], coords[:, 1], color="blue")
+        # show mesh
         x_mesh = np.linspace(self.mnw_data.coords[0], self.mnw_data.coords[2], self.mnw_data.w_dim + 1)
         y_mesh = np.linspace(self.mnw_data.coords[1], self.mnw_data.coords[3], self.mnw_data.h_dim + 1)
         for i in range(self.mnw_data.w_dim + 1):
@@ -289,20 +299,20 @@ class MeshTrajStatic:
         plt.show()
 
     def _set_mesh_idxs(self):
-        self.mesh_idxs = []  # list(df[ID, idx, idx_next, d_x, d_y])
+        self.mesh_idxs = []  # list(df[ID, *idx, *idx_next, d_x, d_y])
         for i, data in enumerate(self.data_list):
             ids = np.unique(data["ID"].values)
             mesh_idx = []
             data_small = None
             for tmp_id in ids:
                 target = data[data["ID"] == tmp_id]
-                idx = self.mnw_data.get_idx(target[["x", "y"]].values)  # np.array(num_points, 2)
+                idx = self.mnw_data.get_idx(target[["x", "y"]].values)  # np.array(num_points, 2) [[y_idx, x_idx]]
                 # remove the duplicated idx
-                diff = np.diff(idx, axis=0).sum(1)
+                diff = np.abs(np.diff(idx, axis=0)).sum(1)
                 active = np.concatenate([np.array([True]), (diff != 0).astype(bool)])
                 idx = idx[active]
                 for j in range(len(idx) - 1):
-                    interpolated = self.mnw_data.interpolate(idx[j], idx[j + 1])  # interplate the trajectory
+                    interpolated = self.mnw_data.interpolate(idx[j], idx[j + 1])  # interpolate the trajectory
                     for k in range(len(interpolated) - 1):
                         mesh_idx.append([tmp_id, *interpolated[k], *interpolated[k + 1], *target[["x", "y"]].values[-1]])
                 if self.data_list_small is not None:

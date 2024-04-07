@@ -78,6 +78,7 @@ if __name__ == "__main__":
     ADDOUTPUT = True
     TRAIN = True
     TEST = True
+    target_case = "20240407131846"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -86,6 +87,8 @@ if __name__ == "__main__":
             os.makedirs(output_dir)
         else:
             raise Exception("Output directory already exists.")
+    else:
+        output_dir = os.path.join(output_dir, target_case)
 
     # instance creation
     output_channel = len(pp_path)
@@ -168,6 +171,7 @@ if __name__ == "__main__":
 
     if TEST:
         print("Testing start")
+        #airl.load(model_dir=os.path.join(output_dir, "20240407131846"))
         airl.load()
         airl.test_models(CONFIG, dataset_test)
     print("Program ends.")

@@ -58,7 +58,7 @@ class MeshAIRLStatic:
         optimizer_ds = [optim.Adam(self.discriminators[i].parameters(), lr=lr_d) for i in range(self.output_channel)]
         optimizer_es = None if self.encoders is None else [optim.Adam(self.encoders[i].parameters(), lr=lr_g) for i in range(self.output_channel)]
 
-        dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle, "drop_last": True}
+        dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle, "drop_last": False}
 
         print(f"Split dataset into train({train_ratio}) and val({1 - train_ratio})")
         dataset_train, dastaset_val = self.dataset.split_into((train_ratio, 1 - train_ratio))
@@ -271,7 +271,7 @@ class MeshAIRLStatic:
 
     def test_models(self, conf_file, dataset, image_file=None):
         print("test start.")
-        dataset_kwargs = {"batch_size": 16, "shuffle": False, "drop_last": True}
+        dataset_kwargs = {"batch_size": 16, "shuffle": False, "drop_last": False}
         epsilon = 0.0
 
         epoch_accuracy = []
@@ -523,10 +523,11 @@ class MeshAIRLStatic:
             self.generators[i].save(self.model_dir, i)
             self.discriminators[i].save(self.model_dir, i)
 
-    def load(self):
+    def load(self, model_dir=None):
+        model_dir = model_dir if model_dir is not None else self.model_dir
         for i in range(self.output_channel):
-            self.generators[i].load(self.model_dir, i)
-            self.discriminators[i].load(self.model_dir, i)
+            self.generators[i].load(model_dir, i)
+            self.discriminators[i].load(model_dir, i)
 
     # visualize
     def show_one_path(self, channel, aid):

@@ -401,7 +401,7 @@ class MeshDatasetStatic:
 
         self.state = [None for _ in range(self.output_channel)]  # state of the current and next mesh
         self.context = [None for _ in range(self.output_channel)]  # context: distance
-        self.next_state = [None for _ in range(self.output_channel)]
+        self.next_state = [None for _ in range(self.output_channel)]  # one_hot of next mesh
         self.mask = None
         self.idxs = [None for _ in range(self.output_channel)]  # idxs: (y_idx, x_idx) of current mesh
 
@@ -424,7 +424,7 @@ class MeshDatasetStatic:
         self.mask = torch.ones((2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32, requires_grad=False)
         self.mask[self.d, self.d] = 0
         self.idxs = [torch.zeros((int(self.trip_nums[channel]), 2), dtype=torch.long) for channel in range(self.output_channel)]
-
+        print(f"MeshDatasetStatic initialize starts. Trip nums: {self.trip_nums}")
         for channel in range(self.output_channel):
             idxs = self.mesh_traj_data.mesh_idxs[channel]  # ["ID", "y_idx", "x_idx", "y_idx_next", "x_idx_next", "d_x", "d_y"]
             aids = np.unique(idxs["ID"].values)
@@ -439,15 +439,16 @@ class MeshDatasetStatic:
                     y_idx_next = target.loc[i, "y_idx_next"]
                     x_idx_next = target.loc[i, "x_idx_next"]
 
+                    # index in whole mesh network grid
                     min_y = max(0, y_idx - self.d)
                     max_y = min(self.mnw_data.h_dim, y_idx + self.d + 1)
                     min_x = max(0, x_idx - self.d)
                     max_x = min(self.mnw_data.w_dim, x_idx + self.d + 1)
+                    # index in (2*d+1, 2*d+1) grid
                     min_y_local = min_y - (y_idx - self.d)
                     max_y_local = max_y - (y_idx - self.d)
                     min_x_local = min_x - (x_idx - self.d)
                     max_x_local = max_x - (x_idx - self.d)
-
                     next_y = min(max(0, y_idx_next - min_y), 2 * self.d)
                     next_x = min(max(0, x_idx_next - min_x), 2 * self.d)
 
@@ -459,6 +460,11 @@ class MeshDatasetStatic:
                     self.idxs[channel][cnt, 1] = x_idx
 
                     cnt += 1
+            self.state[channel] = (self.state[channel] - 0.05) / 0.1
+            self.context[channel] = (self.context[channel] - 300) / 150
+            print(f"MeshDatasetStatic initialize: channel: {channel}, cnt: {cnt}")
+            print(f"  Mean  state: {self.state[channel].mean()}, context: {self.context[channel].mean()}")
+            print(f"  Std   state: {self.state[channel].std()}, context: {self.context[channel].std()}")
 
 
 class MeshDatasetStaticSub(Dataset):
@@ -499,7 +505,7 @@ class ImageDatasetBase(Dataset):
         self.preprocess = transforms.Compose([
                 transforms.PILToTensor(),
                 transforms.ToDtype(torch.float32),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                transforms.Normalize(mean=[110.95507746, 110.7599434, 102.66558818], std=[44.63149753, 45.53861262, 45.94082692]),
             ])
 
         if crop:
@@ -1169,7 +1175,7 @@ class ImageDataset(Dataset):
             input_image = input_image.convert("RGB")
             preprocess = transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                transforms.Normalize(mean=[110.95507746, 110.7599434, 102.66558818], std=[44.63149753, 45.53861262, 45.94082692]),
             ])
 
             input_tensor = preprocess(input_image)  # (3, H, W)
@@ -1181,7 +1187,7 @@ class ImageDataset(Dataset):
                 input_image = input_image.convert("RGB")
                 preprocess = transforms.Compose([
                     transforms.ToTensor(),
-                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                    transforms.Normalize(mean=[5., 5., 5.], std=[2., 2. ,2.]),
                 ])
 
                 input_tensor = preprocess(input_image)  # (3, H, W)

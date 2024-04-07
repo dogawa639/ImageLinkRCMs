@@ -362,6 +362,7 @@ class MeshNetwork:
     def interpolate(idx1, idx2):
         # idx: (y_idx, x_idx)
         # return: np.array(num_points, 2)
+        # includes idx1 and idx2
         dy = idx2[0] - idx1[0]
         dx = idx2[1] - idx1[1]
         idx1 = [*idx1]; idx2 = [*idx2]
