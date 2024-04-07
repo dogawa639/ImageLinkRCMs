@@ -456,7 +456,7 @@ class MeshAIRLStatic:
         if showval > 0:
             showval = min(inputs.shape[0], showval)
             fig = plt.figure(figsize=(8, 1 * showval))
-            showprop = 4
+            showprop = 6
             col = 4 + showprop
             for j in range(showval):
                 ax = fig.add_subplot(showval, col, j * col + 1)  # pi_q, pi_g, next_state, mask

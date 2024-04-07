@@ -75,10 +75,10 @@ if __name__ == "__main__":
 
     IMAGE = False
     USESMALL = True
-    ADDOUTPUT = True
-    TRAIN = True
+    ADDOUTPUT = False
+    TRAIN = False
     TEST = True
-    target_case = "20240408000724"  # only used when ADDOUTPUT is False
+    target_case = "20240408015323"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
