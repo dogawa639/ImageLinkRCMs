@@ -73,12 +73,12 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    IMAGE = False
+    IMAGE = True
     USESMALL = True
     ADDOUTPUT = True
-    TRAIN = True
-    TEST = True
-    target_case = "20240408015323"  # only used when ADDOUTPUT is False
+    TRAIN = False
+    TEST = False
+    target_case = "20240408193947"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:

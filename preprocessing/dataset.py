@@ -451,8 +451,8 @@ class MeshDatasetStatic:
                     max_y_local = max_y - (y_idx - self.d)
                     min_x_local = min_x - (x_idx - self.d)
                     max_x_local = max_x - (x_idx - self.d)
-                    next_y = min(max(0, y_idx_next - min_y), 2 * self.d)
-                    next_x = min(max(0, x_idx_next - min_x), 2 * self.d)
+                    next_y = min(max(0, y_idx_next - y_idx + self.d), 2 * self.d)
+                    next_x = min(max(0, x_idx_next - x_idx + self.d), 2 * self.d)
 
                     self.state[channel][cnt, :, min_y_local:max_y_local, min_x_local:max_x_local] = self.common_state[:, min_y:max_y, min_x:max_x]
                     self.context[channel][cnt, 0, min_y_local:max_y_local, min_x_local:max_x_local] = dist[min_y:max_y, min_x:max_x]
