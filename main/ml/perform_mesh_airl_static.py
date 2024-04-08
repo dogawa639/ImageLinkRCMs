@@ -75,8 +75,8 @@ if __name__ == "__main__":
 
     IMAGE = False
     USESMALL = True
-    ADDOUTPUT = False
-    TRAIN = False
+    ADDOUTPUT = True
+    TRAIN = True
     TEST = True
     target_case = "20240408015323"  # only used when ADDOUTPUT is False
 

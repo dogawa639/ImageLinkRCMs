@@ -235,6 +235,9 @@ class MeshTrajStatic:
     def get_trip_nums(self):
         return np.array([len(data) for data in self.mesh_idxs])
 
+    def get_aids(self):
+        return [np.unique(data["ID"].values) for data in self.data_list]
+
     def get_state(self):
         return self.mnw_data.get_prop_array()  # (max_y_idx - min_y_idx, max_x_idx - min_x_idx, prop_dim)
 

@@ -13,7 +13,7 @@ import pyproj
 
 from PIL import Image
 
-__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv", "Coord", "KalmanFilter", "Hungarian"]
+__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "mutual_information", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv", "Coord", "KalmanFilter", "Hungarian"]
 
 
 def load_json(file):
@@ -54,6 +54,17 @@ def heron_vertex(v1, v2, v3):
     b = np.sqrt((v2[0] - v3[0])**2 + (v2[1] - v3[1])**2)
     c = np.sqrt((v3[0] - v1[0])**2 + (v3[1] - v1[1])**2)
     return heron(a, b, c)
+
+
+def mutual_information(x, y):
+    # x, y: 1d array
+    # return: float, mutual information
+    if len(x) != len(y):
+        raise Exception("x, y should have the same length")
+    cov = np.cov(x, y)
+    if cov[0, 0] == 0.0 or cov[1, 1] == 0.0:
+        return 0.0
+    return -0.5 * np.log(1. - cov[0, 1] ** 2 / (cov[0, 0] * cov[1, 1]))
 
 
 def write_2d_ndarray(file, array):

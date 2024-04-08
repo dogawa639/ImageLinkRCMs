@@ -17,7 +17,7 @@ if __name__ == "__main__":
     GEOFILE = False
     TRAJECTORY = True
 
-    mnw_data = MeshNetwork((-68323.3, 92969.9, -67567.6, 93532.6), 40, 20, 0)
+    mnw_data = MeshNetwork((-69875.305966, 92588.464115, -66556.048456, 94636.347820), 40, 20, 0)
     if GEOFILE:
         mnw_data.write_geo_file(utm_num, os.path.join(data_dir, "mesh.geojson"))
     if TRAJECTORY:
@@ -25,7 +25,8 @@ if __name__ == "__main__":
         traj_data = MeshTrajStatic(data_list, mnw_data)
 
         print(traj_data.get_trip_nums())
-        traj_data.show_traj(0, 48)
+        print(traj_data.get_aids())
+        traj_data.show_traj(0, 1000)
 
         input("Press Enter to continue...")
 

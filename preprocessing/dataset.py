@@ -10,6 +10,8 @@ import torchvision.transforms.v2 as transforms
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
+from utility import mutual_information as mi
+
 from scipy.sparse import csr_matrix, coo_matrix
 
 import pandas as pd
@@ -465,6 +467,9 @@ class MeshDatasetStatic:
             print(f"MeshDatasetStatic initialize: channel: {channel}, cnt: {cnt}")
             print(f"  Mean  state: {self.state[channel].mean(dim=(0, 2, 3))}, context: {self.context[channel].mean(dim=(0, 2, 3))}")
             print(f"  Std   state: {self.state[channel].std(dim=(0, 2, 3))}, context: {self.context[channel].std(dim=(0, 2, 3))}")
+            print(f"  Mut info  state: "
+                  f"{[mi(self.state[channel].clone().detach().numpy()[:, i, :, :].flatten(), self.next_state[channel].clone().detach().numpy().flatten()) for i in range(self.prop_dim)]}, "
+                  f"context: {mi(self.context[channel].clone().detach().numpy().flatten(), self.next_state[channel].clone().detach().numpy().flatten())}")
 
 
 class MeshDatasetStaticSub(Dataset):
@@ -1089,6 +1094,7 @@ class StreetViewXDataset(StreetViewDataset):
                 ax.set_axis_off()
             print(f"Data {i}: ", y_tensor)
         plt.show()
+
 
 # deprecated
 class ImageDataset(Dataset):

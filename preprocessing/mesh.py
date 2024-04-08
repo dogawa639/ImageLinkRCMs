@@ -102,21 +102,23 @@ class MeshNetwork:
         # point: (x, y) or np.array([[x1, y1], [x2, y2], ...])
         if type(points) == tuple:
             return (self.coords[0] <= points[0]) & (points[0] < self.coords[2]) & (self.coords[1] <= points[1]) & (points[1] < self.coords[3])
-        elif type(points) == np.ndarray:
+        else:
             return (self.coords[0] <= points[:, 0]) & (points[:, 0] < self.coords[2]) & (self.coords[1] <= points[:, 1]) & (points[:, 1] < self.coords[3])  # (num_points)
 
     def get_idx(self, points):
         # point: (x, y) or np.array([[x1, y1], [x2, y2], ...])
+        # idx(0, 0): top left
+        # return (y_idx, x_idx) or np.array([[y_idx1, x_idx1], [y_idx2, x_idx2], ...])
         contained = self.contains(points)
         if type(points) == tuple:
             if not contained:
                 return None
             x_idx = int((points[0] - self.coords[0]) / self.x_size)
-            y_idx = int((points[1] - self.coords[1]) / self.y_size)
+            y_idx = self.h_dim - int((points[1] - self.coords[1]) / self.y_size)
             return (y_idx, x_idx)
         else:
             x_idx = ((points[:, 0] - self.coords[0]) / self.x_size).astype(int)
-            y_idx = ((points[:, 1] - self.coords[1]) / self.y_size).astype(int)
+            y_idx = (self.h_dim - (points[:, 1] - self.coords[1]) / self.y_size).astype(int)
             return np.array([[y_idx[i], x_idx[i]] if contained[i] else None for i in
                     range(len(points))])  # (num_points, 2)
 
@@ -127,18 +129,18 @@ class MeshNetwork:
             if not contained:
                 return None
             x_idx = int((points[0] - self.coords[0]) / self.x_size)
-            y_idx = int((points[1] - self.coords[1]) / self.y_size)
+            y_idx = self.h_dim - int((points[1] - self.coords[1]) / self.y_size)
             return self.cells[y_idx][x_idx]
-        elif type(points) == np.ndarray:
+        else:
             x_idx = ((points[:, 0] - self.coords[0]) / self.x_size).astype(int)
-            y_idx = ((points[:, 1] - self.coords[1]) / self.y_size).astype(int)
+            y_idx = (self.h_dim - (points[:, 1] - self.coords[1]) / self.y_size).astype(int)
             return [self.cells[y_idx[i]][x_idx[i]] if contained[i] else None for i in range(len(points))]  # (num_points)
 
     def distance_from(self, points):
         # point: (x, y) or np.array([[x1, y1], [x2, y2], ...])
         if type(points) == tuple:
             return np.sqrt((self.center_coords[:, :, 0] - points[0]) ** 2 + (self.center_coords[:, :, 1] - points[1]) ** 2)  # (h_dim, w_dim)
-        elif type(points) == np.ndarray:
+        else:
             return np.sqrt((np.expand_dims(self.center_coords[:, :, 0], 0) - np.expand_dims(points[:, 0], (1, 2))) ** 2 + (np.expand_dims(self.center_coords[:, :, 1], 0) - np.expand_dims(points[:, 1], (1, 2))) ** 2)  # (num_points, h_dim, w_dim)
 
     def angle_from(self, points):
