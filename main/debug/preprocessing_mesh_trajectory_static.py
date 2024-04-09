@@ -17,7 +17,7 @@ if __name__ == "__main__":
     GEOFILE = False
     TRAJECTORY = True
 
-    mnw_data = MeshNetwork((-69875.305966, 92588.464115, -66556.048456, 94636.347820), 40, 20, 0)
+    mnw_data = MeshNetwork((-69875.305966, 92588.464115, -66556.048456, 94636.347820), 16, 10, 0)
     if GEOFILE:
         mnw_data.write_geo_file(utm_num, os.path.join(data_dir, "mesh.geojson"))
     if TRAJECTORY:

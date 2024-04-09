@@ -92,7 +92,7 @@ class MeshNetwork:
         self.x_size = (coords[2] - coords[0]) / w_dim
         self.y_size = (coords[3] - coords[1]) / h_dim
 
-        self.center_coords = np.array([[[coords[0] + self.x_size * (i + 0.5), coords[1] + self.y_size * (j + 0.5)]
+        self.center_coords = np.array([[[coords[0] + self.x_size * (i + 0.5), coords[1] + self.y_size * (h_dim - j - 0.5)]
                                        for i in range(w_dim)] for j in range(h_dim)])  # (h_dim, w_dim, 2)
 
         self.cells = [[Cell(*self.center_coords[i, j, :], self.x_size, self.y_size, prop_dim)

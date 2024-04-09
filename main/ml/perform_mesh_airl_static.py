@@ -74,7 +74,7 @@ if __name__ == "__main__":
     image_file = os.path.join(fig_dir, "train.png")
 
     IMAGE = True
-    USESMALL = False
+    USESMALL = True
     ADDOUTPUT = True
     TRAIN = True
     TEST = True
@@ -99,6 +99,7 @@ if __name__ == "__main__":
     w_dim,  h_dim = int(dx / mesh_dist), int(dy / mesh_dist)
 
     print("Create MeshNetwork object")
+    print(f"bb_coords: {bb_coords}, w_dim: {w_dim}, h_dim: {h_dim}")
     mnw_data = MeshNetwork(bb_coords, w_dim, h_dim, 5)  # prop_dim: prop from one_hot image
 
     # main process
@@ -173,7 +174,7 @@ if __name__ == "__main__":
 
     if TRAIN:
         print("Pre training start")
-        airl.pretrain_models(CONFIG, 10, bs, lr_g, shuffle, train_ratio=train_ratio)
+        airl.pretrain_models(CONFIG, 5, bs, lr_g, shuffle, train_ratio=train_ratio)
         print("Training start")
         airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
 
