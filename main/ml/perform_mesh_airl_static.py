@@ -175,7 +175,7 @@ if __name__ == "__main__":
         print("Pre training start")
         airl.pretrain_models(CONFIG, 10, bs, lr_g, shuffle, train_ratio=train_ratio)
         print("Training start")
-        airl.train_models(CONFIG, epoch, bs, lr_g, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
+        airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
 
     if TEST:
         print("Testing start")
