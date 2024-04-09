@@ -76,8 +76,8 @@ if __name__ == "__main__":
     IMAGE = True
     USESMALL = True
     ADDOUTPUT = True
-    TRAIN = False
-    TEST = False
+    TRAIN = True
+    TEST = True
     target_case = "20240408193947"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
@@ -99,7 +99,7 @@ if __name__ == "__main__":
     w_dim,  h_dim = int(dx / mesh_dist), int(dy / mesh_dist)
 
     print("Create MeshNetwork object")
-    mnw_data = MeshNetwork(bb_coords, w_dim, h_dim, 5)  # prop_dim: prop from one_hot image
+    mnw_data = MeshNetwork(bb_coords, w_dim, h_dim, 10)  # prop_dim: prop from one_hot image
 
     # main process
     if IMAGE:
