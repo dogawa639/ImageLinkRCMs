@@ -75,8 +75,8 @@ if __name__ == "__main__":
 
     IMAGE = False
     USESMALL = True
-    ADDOUTPUT = False
-    TRAIN = False
+    ADDOUTPUT = True
+    TRAIN = True
     TEST = True
     target_case = "20240410010935"  # only used when ADDOUTPUT is False
 
@@ -126,8 +126,8 @@ if __name__ == "__main__":
         mesh_traj_data = MeshTrajStatic(pp_path, mnw_data, pp_path_small)  # write down the trimmed data into the pp_path_small
     print(f"Split dataset into train & val ({train_ratio / 10}) and test ({(1 - train_ratio) / 10})")
     mesh_traj_train, mesh_traj_test = mesh_traj_data.split_into((train_ratio / 10, (1 - train_ratio) / 10))
-    dataset_train = MeshDatasetStatic(mesh_traj_train, 1)
-    dataset_test = MeshDatasetStatic(mesh_traj_test, 1)
+    dataset_train = MeshDatasetStatic(mesh_traj_train, 2)
+    dataset_test = MeshDatasetStatic(mesh_traj_test, 2)
 
     # normalize state and context
     print("Normalize state and context")
