@@ -93,6 +93,7 @@ if __name__ == "__main__":
     plt.plot(mesh_dists, mis)
     plt.xlabel("mesh_dist")
     plt.ylabel("context mutual information")
+    plt.legend()
     plt.show()
 
 
