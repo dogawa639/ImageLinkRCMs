@@ -456,7 +456,7 @@ class MeshDatasetStatic:
     def _set_values(self):
         self.state = [torch.zeros((self.trip_nums[channel], self.prop_dim, 2 * self.d + 1, 2 * self.d + 1),
                                  dtype=torch.float32, requires_grad=False) for channel in range(self.output_channel)]
-        self.context = [torch.zeros((self.trip_nums[channel], 1, 2 * self.d + 1, 2 * self.d + 1),
+        self.context = [torch.full((self.trip_nums[channel], 1, 2 * self.d + 1, 2 * self.d + 1), 1000,
                                    dtype=torch.float32, requires_grad=False) for channel in range(self.output_channel)]  # context: distance
         self.next_state = [torch.zeros((self.trip_nums[channel], 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32, requires_grad=False) for channel in range(self.output_channel)]
         self.mask = torch.ones((2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32, requires_grad=False)
