@@ -877,7 +877,23 @@ class OneHotImageData(SatelliteImageData):
         for i, data in enumerate(self.data_list):
             tif_path = data["path"]
             onehot_path = os.path.splitext(data["path"])[0] + "_onehot.npy"
-            self.gis_segs[i].convert_file(tif_path, np_file=onehot_path)
+            png_data, _ = self.gis_segs[i].convert_file(tif_path, np_file=onehot_path)  # png_data: np.ndarray (H, W)
+            with rasterio.open(tif_path, "r") as src:
+                crs = src.crs
+                transformation = src.transform
+
+            with rasterio.open(
+                    tif_path,
+                    "w",
+                    crs=crs,
+                    driver="GTiff",
+                    dtype=rasterio.uint8,
+                    count=1,
+                    width=png_data.shape[1],
+                    height=png_data.shape[0],
+                    transform=transformation
+            ) as dst:
+                dst.write(png_data, indexes=1)
             self.data_list[i]["onehot"] = onehot_path
 
         self._output_data_file()

@@ -429,7 +429,7 @@ class MeshAIRLStatic:
         logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32, device=logits.device))
         pi_g = F.softmax(logits.reshape(inputs.shape[0], -1), dim=-1)  # (bs, (2*d+1)^2)
 
-        ll = log((pi_q.reshape(*q.shape) * next_state).sum(dim=-1)).sum()
+        ll = log((pi_q * next_state.reshape(pi_q.shape)).sum(dim=-1)).sum()
 
         pred_state = (pi_q == pi_q.max(dim=1, keepdim=True)[0]).reshape(*q.shape).to(torch.float32)  # (bs, 2d+1, 2d+1)
 

@@ -73,12 +73,12 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    IMAGE = True
+    IMAGE = False
     USESMALL = True
-    ADDOUTPUT = True
-    TRAIN = True
+    ADDOUTPUT = False
+    TRAIN = False
     TEST = True
-    target_case = "20240408193947"  # only used when ADDOUTPUT is False
+    target_case = "20240410010935"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -99,7 +99,7 @@ if __name__ == "__main__":
     w_dim,  h_dim = int(dx / mesh_dist), int(dy / mesh_dist)
 
     print("Create MeshNetwork object")
-    mnw_data = MeshNetwork(bb_coords, w_dim, h_dim, 10)  # prop_dim: prop from one_hot image
+    mnw_data = MeshNetwork(bb_coords, w_dim, h_dim, 5)  # prop_dim: prop from one_hot image
 
     # main process
     if IMAGE:
@@ -128,6 +128,12 @@ if __name__ == "__main__":
     mesh_traj_train, mesh_traj_test = mesh_traj_data.split_into((train_ratio / 10, (1 - train_ratio) / 10))
     dataset_train = MeshDatasetStatic(mesh_traj_train, 1)
     dataset_test = MeshDatasetStatic(mesh_traj_test, 1)
+
+    # normalize state and context
+    print("Normalize state and context")
+    params = dataset_train.get_normalization_params()
+    dataset_train.normalize(*params)
+    dataset_test.normalize(*params)
 
     # load satellite image data
     print("Load MeshImageData object")

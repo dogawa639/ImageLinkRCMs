@@ -391,9 +391,13 @@ class MeshDataset(Dataset):
 
 class MeshDatasetStatic:
     #
+    state_mean = 0.05  # float or ndarray
+    state_std = 0.1  # float or ndarray
+    context_std = 150  # float or ndarray
     def __init__(self, mesh_traj_data, d):
         self.mesh_traj_data = mesh_traj_data  # MeshTrajStatic
         self.d = d
+
         self.mnw_data = mesh_traj_data.mnw_data
         self.prop_dim = mesh_traj_data.mnw_data.prop_dim  # prop_dim: output_channel + common_channel
         self.output_channel = len(mesh_traj_data.data_list)
@@ -416,6 +420,35 @@ class MeshDatasetStatic:
 
     def get_sub_datasets(self):
         return [MeshDatasetStaticSub(self.state[channel], self.context[channel], self.next_state[channel], self.mask, self.idxs[channel]) for channel in range(self.output_channel)]
+
+    def get_normalization_params(self):
+        # return: state_mean, state_std, context_std list(tensor)
+        state_mean = []
+        state_std = []
+        context_std = []
+        for channel in range(self.output_channel):
+            state_mean_tmp = self.state[channel].mean(dim=(0, 2, 3), keepdim=True)
+            state_std_tmp = self.state[channel].std(axis=(0, 2, 3), keepdim=True)
+            context_std_tmp = self.context[channel].std(axis=(0, 2, 3), keepdim=True)
+
+            state_std_tmp[state_std_tmp == 0] = 1.0
+            context_std_tmp[context_std_tmp == 0] = 1.0
+
+            state_mean.append(state_mean_tmp)
+            state_std.append(state_std_tmp)
+            context_std.append(context_std_tmp)
+        return state_mean, state_std, context_std
+
+    def normalize(self, state_mean, state_std, context_std):
+        for channel in range(self.output_channel):
+            self.state[channel] = (self.state[channel] - state_mean[channel]) / state_std[channel]
+            min_context = self.context[channel].clone().detach().cpu().numpy().min(axis=(2, 3), keepdims=True)
+            self.context[channel] = (self.context[channel] - tensor(min_context, dtype=torch.float32)) / context_std[channel]
+            print(f"MeshDatasetStatic normalize: channel: {channel}")
+            print(
+                f"  Mean  state: {self.state[channel].mean(dim=(0, 2, 3))}, context: {self.context[channel].mean(dim=(0, 2, 3))}")
+            print(
+                f"  Std   state: {self.state[channel].std(dim=(0, 2, 3))}, context: {self.context[channel].std(dim=(0, 2, 3))}")
 
     def _set_values(self):
         self.state = [torch.zeros((self.trip_nums[channel], self.prop_dim, 2 * self.d + 1, 2 * self.d + 1),
@@ -462,8 +495,10 @@ class MeshDatasetStatic:
                     self.idxs[channel][cnt, 1] = x_idx
 
                     cnt += 1
-            self.state[channel] = (self.state[channel] - 0.05) / 0.1
-            self.context[channel] = (self.context[channel] - 300) / 150
+
+            self.state[channel] = (self.state[channel] - MeshDatasetStatic.state_mean) / MeshDatasetStatic.state_std
+            min_context = self.context[channel].clone().detach().cpu().numpy().min(axis=(2, 3), keepdims=True)
+            self.context[channel] = (self.context[channel] - tensor(min_context, dtype=torch.float32)) / MeshDatasetStatic.context_std
             print(f"MeshDatasetStatic initialize: channel: {channel}, cnt: {cnt}")
             print(f"  Mean  state: {self.state[channel].mean(dim=(0, 2, 3))}, context: {self.context[channel].mean(dim=(0, 2, 3))}")
             print(f"  Std   state: {self.state[channel].std(dim=(0, 2, 3))}, context: {self.context[channel].std(dim=(0, 2, 3))}")
