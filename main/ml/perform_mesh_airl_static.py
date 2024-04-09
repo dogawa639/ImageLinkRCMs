@@ -82,7 +82,9 @@ if __name__ == "__main__":
 
     # add datetime to output_dir
     if ADDOUTPUT:
-        output_dir = os.path.join(output_dir, datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+        date_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        print(f"date_str: {date_str}")
+        output_dir = os.path.join(output_dir, date_str)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
         else:
