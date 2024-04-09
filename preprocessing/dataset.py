@@ -450,6 +450,9 @@ class MeshDatasetStatic:
             print(
                 f"  Std   state: {self.state[channel].std(dim=(0, 2, 3))}, context: {self.context[channel].std(dim=(0, 2, 3))}")
 
+    def get_context_mi(self):
+        return [mi(self.context[channel].clone().detach().numpy().flatten(), self.next_state[channel].clone().detach().numpy().flatten()) for channel in range(self.output_channel)]
+
     def _set_values(self):
         self.state = [torch.zeros((self.trip_nums[channel], self.prop_dim, 2 * self.d + 1, 2 * self.d + 1),
                                  dtype=torch.float32, requires_grad=False) for channel in range(self.output_channel)]

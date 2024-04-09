@@ -269,6 +269,69 @@ class MeshAIRLStatic:
         log.close()
         print("Training ends.")
 
+    def pretrain_models(self, conf_file, epochs, batch_size, lr_g, shuffle,
+                     train_ratio=0.8):
+        epsilon = 0.0
+
+        optimizer_gs = [optim.Adam(self.generators[i].parameters(), lr=lr_g) for i in range(self.output_channel)]
+        optimizer_es = None if self.encoders is None else [optim.Adam(self.encoders[i].parameters(), lr=lr_g) for i in range(self.output_channel)]
+
+        dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle, "drop_last": False}
+
+        print(f"Split dataset into train({train_ratio}) and val({1 - train_ratio})")
+        dataset_train, dastaset_val = self.dataset.split_into((train_ratio, 1 - train_ratio))
+        dataloaders_train = [DataLoader(dataset_tmp, **dataset_kwargs) for dataset_tmp in dataset_train.get_sub_datasets()]  # [MeshDatasetStaticSub] len: channel
+
+        print("Pretraining starts.")
+        min_criteria = 1e10
+        for e in range(epochs):
+            t1 = time.perf_counter()
+
+            for channel in range(self.output_channel):  # transportation mode
+                self.train()
+                for state, context, next_state, mask, idx in dataloaders_train[channel]:  # batch
+                    # state: (bs, prop_dim, 2d+1, 2d+1)
+                    # context: (bs, context_num, 2d+1, 2d+1)
+                    # next_state: (bs, 2d+1, 2d+1), 0 or 1
+                    # mask: (bs, 2d+1, 2d+1), 0 or 1
+                    # idx: (bs, 2), agent position index (y_idx, x_idx)
+                    state = state.to(self.device)
+                    context = context.to(self.device)
+                    next_state = next_state.to(self.device)  # (bs, 2d+1, 2d+1)
+                    mask = mask.to(self.device)  # (bs, 2d+1, 2d+1)
+                    if self.use_encoder:
+                        self.encoders[channel].train()
+                    inputs, inputs_other = self.cat_all_feature(state, context, idx, channel)  # (bs, prop_dim+context_num+image_num, 2d+1, 2d+1). requires_grad=True
+
+                    # pi of the target transportation
+                    for i in range(self.output_channel):
+                        self.generators[i].eval()
+                    self.generators[channel].train()
+                    logits = self.generators[channel](inputs)  # raw_data_fake requires_grad=True, (bs, 2d+1, 2d+1)
+                    logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32,
+                                                                  device=logits.device))
+
+                    loss_g = F.binary_cross_entropy_with_logits(logits, next_state, reduction="mean")
+
+                    optimizer_gs[channel].zero_grad()
+                    if self.use_encoder:
+                        optimizer_es[channel].zero_grad()
+                    #with detect_anomaly():
+                    loss_g.backward(retain_graph=True)
+
+                    # generator update
+                    optimizer_gs[channel].step()
+                    if self.use_encoder:
+                        optimizer_es[channel].step()
+
+                    del loss_g
+
+            self.save()
+
+            t2 = time.perf_counter()
+            print("epoch: {}, time: {:.4f}".format(e, t2 - t1))
+        print("Pretraining ends.")
+
     def test_models(self, conf_file, dataset, image_file=None):
         print("test start.")
         dataset_kwargs = {"batch_size": 16, "shuffle": False, "drop_last": False}

@@ -60,7 +60,7 @@ if __name__ == "__main__":
     h_dim = int(read_model_general["h_dim"])  # int
     w_dim = int(read_model_general["w_dim"])  # int
 
-    mesh_dist = int(read_model_general["mesh_dist"])  # int
+    mesh_dist = 100 #int(read_model_general["mesh_dist"])  # int
 
     # encoder setting
     read_model_enc = config["ENCODER"]
@@ -73,8 +73,8 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    IMAGE = False
-    USESMALL = True
+    IMAGE = True
+    USESMALL = False
     ADDOUTPUT = True
     TRAIN = True
     TEST = True
@@ -126,8 +126,8 @@ if __name__ == "__main__":
         mesh_traj_data = MeshTrajStatic(pp_path, mnw_data, pp_path_small)  # write down the trimmed data into the pp_path_small
     print(f"Split dataset into train & val ({train_ratio / 10}) and test ({(1 - train_ratio) / 10})")
     mesh_traj_train, mesh_traj_test = mesh_traj_data.split_into((train_ratio / 10, (1 - train_ratio) / 10))
-    dataset_train = MeshDatasetStatic(mesh_traj_train, 2)
-    dataset_test = MeshDatasetStatic(mesh_traj_test, 2)
+    dataset_train = MeshDatasetStatic(mesh_traj_train, 1)
+    dataset_test = MeshDatasetStatic(mesh_traj_test, 1)
 
     # normalize state and context
     print("Normalize state and context")
@@ -172,8 +172,10 @@ if __name__ == "__main__":
                  image_data=image_data, encoders=encoders, hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, device=device)
 
     if TRAIN:
+        print("Pre training start")
+        airl.pretrain_models(CONFIG, 10, bs, lr_g, shuffle, train_ratio=train_ratio)
         print("Training start")
-        airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
+        airl.train_models(CONFIG, epoch, bs, lr_g, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
 
     if TEST:
         print("Testing start")
