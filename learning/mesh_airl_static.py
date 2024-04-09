@@ -58,7 +58,7 @@ class MeshAIRLStatic:
         optimizer_ds = [optim.Adam(self.discriminators[i].parameters(), lr=lr_d) for i in range(self.output_channel)]
         optimizer_es = None if self.encoders is None else [optim.Adam(self.encoders[i].parameters(), lr=lr_g) for i in range(self.output_channel)]
 
-        dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle, "drop_last": False}
+        dataset_kwargs = {"batch_size": batch_size, "shuffle": shuffle, "drop_last": True}
 
         print(f"Split dataset into train({train_ratio}) and val({1 - train_ratio})")
         dataset_train, dastaset_val = self.dataset.split_into((train_ratio, 1 - train_ratio))

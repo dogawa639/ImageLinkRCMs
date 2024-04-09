@@ -60,7 +60,7 @@ if __name__ == "__main__":
     h_dim = int(read_model_general["h_dim"])  # int
     w_dim = int(read_model_general["w_dim"])  # int
 
-    mesh_dist = 100 #int(read_model_general["mesh_dist"])  # int
+    mesh_dist = 200 #int(read_model_general["mesh_dist"])  # int
 
     # encoder setting
     read_model_enc = config["ENCODER"]
