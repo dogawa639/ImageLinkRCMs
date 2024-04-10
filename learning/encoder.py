@@ -129,6 +129,18 @@ class ViTEnc(nn.Module):
             return x, atten
         return x
 
+    def save(self, model_dir, i=None):
+        if i is None:
+            torch.save(self.state_dict(), model_dir + "/vitenc.pth")
+        else:
+            torch.save(self.state_dict(), model_dir + f"/vitenc_{i}.pth")
+
+    def load(self, model_dir, i=None):
+        if i is None:
+            self.load_state_dict(torch.load(model_dir + "/vitenc.pth"))
+        else:
+            self.load_state_dict(torch.load(model_dir + f"/vitenc_{i}.pth"))
+
 
 
 

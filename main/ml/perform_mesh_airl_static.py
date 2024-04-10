@@ -6,6 +6,7 @@ if __name__ == "__main__":
 
     import geopandas as gpd
     import pandas as pd
+    import matplotlib.pyplot as plt
 
     from learning.generator import *
     from learning.discriminator import *
@@ -73,12 +74,12 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    IMAGE = True
+    IMAGE = False
     USESMALL = True
-    ADDOUTPUT = True
-    TRAIN = True
+    ADDOUTPUT = False
+    TRAIN = False
     TEST = True
-    target_case = "20240410010935"  # only used when ADDOUTPUT is False
+    target_case = "20240410095842"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -127,8 +128,8 @@ if __name__ == "__main__":
         mesh_traj_data = MeshTrajStatic(pp_path_small, mnw_data)
     else:
         mesh_traj_data = MeshTrajStatic(pp_path, mnw_data, pp_path_small)  # write down the trimmed data into the pp_path_small
-    print(f"Split dataset into train & val ({train_ratio / 10}) and test ({(1 - train_ratio) / 10})")
-    mesh_traj_train, mesh_traj_test = mesh_traj_data.split_into((train_ratio / 10, (1 - train_ratio) / 10))
+    print(f"Split dataset into train & val ({train_ratio / 5}) and test ({(1 - train_ratio) / 5})")
+    mesh_traj_train, mesh_traj_test = mesh_traj_data.split_into((train_ratio / 5, (1 - train_ratio) / 5))
     dataset_train = MeshDatasetStatic(mesh_traj_train, 1)
     dataset_test = MeshDatasetStatic(mesh_traj_test, 1)
 
@@ -176,7 +177,7 @@ if __name__ == "__main__":
 
     if TRAIN:
         print("Pre training start")
-        airl.pretrain_models(CONFIG, 5, bs, lr_g, shuffle, train_ratio=train_ratio)
+        airl.pretrain_models(CONFIG, 1, bs, lr_g, shuffle, train_ratio=train_ratio)
         print("Training start")
         airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
 
@@ -185,4 +186,10 @@ if __name__ == "__main__":
         #airl.load(model_dir=os.path.join(output_dir, "20240407131846"))
         airl.load()
         airl.test_models(CONFIG, dataset_test)
+
+        img_tensor = image_data.load_mesh_image(0)[0]
+        org_img = image_data.load_org_image(0)[0]
+        airl.show_attention_map(img_tensor)
+        plt.imshow(org_img)
+        plt.show()
     print("Program ends.")

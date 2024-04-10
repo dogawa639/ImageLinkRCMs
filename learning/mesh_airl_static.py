@@ -589,26 +589,53 @@ class MeshAIRLStatic:
         else:
             return torch.cat((state, context), dim=1), [torch.cat((state, torch.zeros_like(context)), dim=1) for _ in range(self.output_channel)]
 
+    def show_attention_map(self, img_tensor):
+        # img_tensor: tensor(bs2, c, h, width) or (c, h, width)
+        # self.encoders[i]: output_atten=True
+        if len(img_tensor.shape) == 3:
+            bs = 1
+        else:
+            bs = img_tensor.shape[0]
+        fig = plt.figure(figsize=(4 * bs, 4 * self.output_channel))
+        img_tensor = img_tensor.to(self.device)
+        for channel in range(self.output_channel):
+            _, atten = self.encoders[channel].compress(img_tensor)  # atten: (bs, h, w)
+            for i in range(bs):
+                ax = fig.add_subplot(self.output_channel, bs, channel * bs + i + 1)
+                ax.imshow(atten[i].clone().detach().cpu().numpy(), cmap="gray")
+                ax.set_title(f"channel {channel} bs {i}")
+                ax.set_xticks([]); ax.set_yticks([])
+        plt.tight_layout()
+        plt.show()
+
     def train(self):
         for i in range(self.output_channel):
             self.generators[i].train()
             self.discriminators[i].train()
+            if self.use_encoder:
+                self.encoders[i].train()
 
     def eval(self):
         for i in range(self.output_channel):
             self.generators[i].eval()
             self.discriminators[i].eval()
+            if self.use_encoder:
+                self.encoders[i].eval()
 
     def save(self):
         for i in range(self.output_channel):
             self.generators[i].save(self.model_dir, i)
             self.discriminators[i].save(self.model_dir, i)
+            if self.use_encoder:
+                self.encoders[i].save(self.model_dir, i)
 
     def load(self, model_dir=None):
         model_dir = model_dir if model_dir is not None else self.model_dir
         for i in range(self.output_channel):
             self.generators[i].load(model_dir, i)
             self.discriminators[i].load(model_dir, i)
+            if self.use_encoder:
+                self.encoders[i].load(model_dir, i)
 
     # visualize
     def show_one_path(self, channel, aid):
