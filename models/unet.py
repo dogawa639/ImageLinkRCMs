@@ -67,10 +67,11 @@ class UNetBlock(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, input_channels, output_channels, depth=4, sn=False, dropout=0.0):
+    def __init__(self, input_channels, output_channels, depth=4, sn=False, dropout=0.0, act_fn=lambda x : x):
         super().__init__()
         self.input_channels = input_channels
         self.output_channels = output_channels
+        self.act_fn = act_fn
 
         self.conv0 = BaseConv(input_channels, 64, sn=sn)
         self.blocks = nn.ModuleList([UNetBlock(64 * 2 ** (depth - 1), 128 * 2 ** (depth - 1), sn=sn, dropout=dropout)])  # (128 * 2^(depth - 1), H/2^depth, W/2^depth)
@@ -82,7 +83,7 @@ class UNet(nn.Module):
     def forward(self, x):
         x = self.conv0(x)
         x = self.blocks[-1](x)
-        x = self.out_conv(x)
+        x = self.act_fn(self.out_conv(x))
         return x
 
 

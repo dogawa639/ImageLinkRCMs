@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from models.cnn import CNN3x3
 from models.gnn import GT
 from models.unet import UNet
-from models.general import FF, SLN
+from models.general import FF, SLN, softplus
 
 import numpy as np
 __all__ = ["CNNGen", "GNNGen", "UNetGen"]
@@ -252,7 +252,7 @@ class UNetGen(nn.Module):
         self.context_num = context_num
         self.total_feature = feature_num + context_num
 
-        self.unet = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=depth)
+        self.unet = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=depth, act_fn=lambda x : -softplus(x))
 
     def forward(self, inputs):
         # inputs: (bs, total_feature, 2d+1, 2d+1)

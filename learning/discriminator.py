@@ -267,9 +267,9 @@ class UNetDisStatic(nn.Module):
         self.gamma = gamma
         self.ext_coeff = ext_coeff
 
-        self.util = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=depth)
-        self.ext = UNet(self.total_feature + output_channel - 1, 1, sn=True, dropout=dropout, depth=depth)  # state + other agent's pi
-        self.val = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=depth)
+        self.util = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=depth, act_fn=lambda x : -softplus(x))
+        self.ext = UNet(self.total_feature + output_channel - 1, 1, sn=True, dropout=dropout, depth=depth, act_fn=lambda x : -softplus(x))  # state + other agent's pi
+        self.val = UNet(self.total_feature, 1, sn=sn, dropout=dropout, depth=depth, act_fn=lambda x : -softplus(x))
 
     def forward(self, input, pi_other):
         # input: (bs, total_feature, 2d+1, 2d+1)
