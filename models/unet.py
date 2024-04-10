@@ -32,10 +32,16 @@ class BaseConv(nn.Module):
         return self.sequence(x)
 
 class UNetBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, sub=None, sn=False, dropout=0.0):
+    def __init__(self, in_channels, out_channels, sub=None, pool_type="max", sn=False, dropout=0.0):
+        # pool_type: none, max or avg
         super().__init__()
         self.conv1 = BaseConv(in_channels, out_channels, sn, dropout)
-        self.pool = nn.MaxPool2d(2)
+        if pool_type == "max":
+            self.pool = nn.MaxPool2d(2)
+        elif pool_type == "avg":
+            self.pool = nn.AvgPool2d(2)
+        else:
+            self.pool = nn.Identity()
 
         self.upconv = nn.ConvTranspose2d(out_channels, out_channels // 2, 2, stride=2)
         self.conv2 = BaseConv(out_channels // 2 + in_channels, in_channels, sn, dropout)
@@ -67,14 +73,15 @@ class UNetBlock(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, input_channels, output_channels, depth=4, sn=False, dropout=0.0, act_fn=lambda x : x):
+    def __init__(self, input_channels, output_channels, depth=4, sn=False, pool_type="max", dropout=0.0, act_fn=lambda x : x):
+        # pool_type: none, max or avg
         super().__init__()
         self.input_channels = input_channels
         self.output_channels = output_channels
         self.act_fn = act_fn
 
         self.conv0 = BaseConv(input_channels, 64, sn=sn)
-        self.blocks = nn.ModuleList([UNetBlock(64 * 2 ** (depth - 1), 128 * 2 ** (depth - 1), sn=sn, dropout=dropout)])  # (128 * 2^(depth - 1), H/2^depth, W/2^depth)
+        self.blocks = nn.ModuleList([UNetBlock(64 * 2 ** (depth - 1), 128 * 2 ** (depth - 1), sn=sn, pool_type=pool_type, dropout=dropout)])  # (128 * 2^(depth - 1), H/2^depth, W/2^depth)
         for i in range(depth - 2, - 1, -1):
             self.blocks.append(UNetBlock(64 * 2 ** i, 128 * 2 ** i, sub=self.blocks[-1], sn=sn, dropout=dropout))  # (128 * 2^i, H/2^(i+1), W/2^(i+1))
 

@@ -346,7 +346,7 @@ class AIRL:
             self.generator.eval()
             self.generator.to("cpu")
             f = lambda x: self.generator(Variable(torch.from_numpy(x.reshape(-1, *inputs_shape[1:]))),
-                                         i=i).detach().cpu().numpy().sum((1, 2))
+                                         i=i).detach().cpu().numpy().sum((1, 2))  # x: (bs, num_var)
             print(inputs.shape)
             print(f(inputs).shape)
             explainer = shap.KernelExplainer(f, inputs)
@@ -354,7 +354,7 @@ class AIRL:
             inputs_shape = inputs_test.shape
             inputs_test = inputs_test.detach().cpu().numpy().reshape(inputs_shape[0], -1)
             print(f(inputs_test).shape)
-            sv = explainer.shap_values(inputs_test)
+            sv = explainer.shap_values(inputs_test)  # (bs, num_var)
             print(sv.shape)
             print("shap_values", sv)
             sv_reshaped = sv.reshape(-1, *inputs_shape[1:]).transpose(0, 2, 3, 1).reshape(-1, link_feature_num)
@@ -371,7 +371,7 @@ class AIRL:
             explainer = shap.KernelExplainer(f, inputs)
 
             inputs_shape = inputs_test.shape
-            inputs_test = inputs_test.detach().cpu().numpy().reshape(inputs_shape[0], -1)
+            inputs_test = inputs_test.detach().cpu().numpy().reshape(inputs_shape[0], -1)  # (bs, num_var)
             print(f(inputs_test).shape)
             sv = explainer.shap_values(inputs_test)
             print(sv.shape)

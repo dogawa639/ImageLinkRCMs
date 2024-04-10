@@ -76,10 +76,11 @@ if __name__ == "__main__":
 
     IMAGE = False
     USESMALL = True
-    ADDOUTPUT = False
-    TRAIN = False
+    ADDOUTPUT = True
+    TRAIN = True
     TEST = True
-    target_case = "20240410095842"  # only used when ADDOUTPUT is False
+    SHOWATTEN = True
+    target_case = "20240410130218"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -177,7 +178,7 @@ if __name__ == "__main__":
 
     if TRAIN:
         print("Pre training start")
-        airl.pretrain_models(CONFIG, 1, bs, lr_g, shuffle, train_ratio=train_ratio)
+        airl.pretrain_models(CONFIG, 10, bs, lr_g, shuffle, train_ratio=train_ratio)
         print("Training start")
         airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
 
@@ -187,9 +188,30 @@ if __name__ == "__main__":
         airl.load()
         airl.test_models(CONFIG, dataset_test)
 
-        img_tensor = image_data.load_mesh_image(0)[0]
-        org_img = image_data.load_org_image(0)[0]
-        airl.show_attention_map(img_tensor)
-        plt.imshow(org_img)
-        plt.show()
+    if SHOWATTEN:
+    #  show attention map
+        if not  os.path.exists(os.path.join(output_dir, "atten")):
+            os.mkdir(os.path.join(output_dir, "atten"))
+        for row in range(h_dim):
+            for col in range(w_dim):
+
+                img_tensor = image_data.load_mesh_image(row, col)[0]
+                org_img = image_data.load_org_image(row, col)
+                attens = airl.show_attention_map(img_tensor, show=False)
+                
+                output_channel = len(attens)
+                if img_tensor.dim() == 3:
+                    bs = 1
+                else:
+                    bs = img_tensor.shape[0]
+                fig = plt.figure(figsize=((1 + output_channel) * 4, bs * 4))
+                for i in range(bs):
+                    plt.subplot(bs, 1 + output_channel, i * (1 + output_channel) + 1)
+                    plt.imshow(org_img[i])
+                    for j in range(output_channel):
+                        plt.subplot(bs, 1 + output_channel, i * (1 + output_channel) + j + 2)
+                        plt.imshow(attens[j][i])
+                plt.savefig(os.path.join(output_dir, "atten", f"{row}_{col}.png"))
+                plt.clf()
+                plt.close()
     print("Program ends.")

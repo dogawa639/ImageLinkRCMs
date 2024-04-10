@@ -159,6 +159,16 @@ class MeshAIRLStatic:
                             pi = pi.detach()
 
                         del log_d_g, log_d_d, loss_d, loss_g
+                # udpate learning rate
+                if e > 0 and e % 5 == 0:
+                    gamma = 0.5
+                    for param_group in optimizer_gs[channel].param_groups:
+                        param_group['lr'] = param_group['lr'] * gamma
+                    for param_group in optimizer_ds[channel].param_groups:
+                        param_group['lr'] = param_group['lr'] * gamma
+                    if self.use_encoder:
+                        for param_group in optimizer_es[channel].param_groups:
+                            param_group['lr'] = param_group['lr'] * gamma
 
                 # validation
                 self.eval()
@@ -434,6 +444,11 @@ class MeshAIRLStatic:
         for i in range(self.output_channel):
             print(f"channel {i}: accuracy: {epoch_accuracy[i]}, ll: {epoch_ll[i]} (Ave. {epoch_ll[i] / epoch_bs[i]}), ll0: {epoch_ll0[i]}, dist: {epoch_dist[i]}, criteria: {epoch_criteria[i]}, total_row: {epoch_bs[i]}, bs: {epoch_bs[i] / epoch_bs_count[i]}")
 
+        # save result
+        with open(os.path.join(self.model_dir, "test_result.txt"), "w") as f:
+            for i in range(self.output_channel):
+                f.write(f"channel {i}: accuracy: {epoch_accuracy[i]}, ll: {epoch_ll[i]} (Ave. {epoch_ll[i] / epoch_bs[i]}), ll0: {epoch_ll0[i]}, dist: {epoch_dist[i]}, criteria: {epoch_criteria[i]}, total_row: {epoch_bs[i]}, bs: {epoch_bs[i] / epoch_bs_count[i]}\n")
+
         print("test end.")
 
     def loss(self, log_d_g, log_d_d, hinge_loss=False):
@@ -589,7 +604,7 @@ class MeshAIRLStatic:
         else:
             return torch.cat((state, context), dim=1), [torch.cat((state, torch.zeros_like(context)), dim=1) for _ in range(self.output_channel)]
 
-    def show_attention_map(self, img_tensor):
+    def show_attention_map(self, img_tensor, show=True):
         # img_tensor: tensor(bs2, c, h, width) or (c, h, width)
         # self.encoders[i]: output_atten=True
         if len(img_tensor.shape) == 3:
@@ -598,15 +613,22 @@ class MeshAIRLStatic:
             bs = img_tensor.shape[0]
         fig = plt.figure(figsize=(4 * bs, 4 * self.output_channel))
         img_tensor = img_tensor.to(self.device)
+        attens = []
         for channel in range(self.output_channel):
             _, atten = self.encoders[channel].compress(img_tensor)  # atten: (bs, h, w)
-            for i in range(bs):
-                ax = fig.add_subplot(self.output_channel, bs, channel * bs + i + 1)
-                ax.imshow(atten[i].clone().detach().cpu().numpy(), cmap="gray")
-                ax.set_title(f"channel {channel} bs {i}")
-                ax.set_xticks([]); ax.set_yticks([])
-        plt.tight_layout()
-        plt.show()
+            atten = atten.clone().detach().cpu().numpy()
+            attens.append(atten)
+        if show:
+            for channel in range(self.output_channel):
+                bs = attens[channel].shape[0]
+                for i in range(bs):
+                    ax = fig.add_subplot(self.output_channel, bs, channel * bs + i + 1)
+                    ax.imshow(attens[channel][i], cmap="gray")
+                    ax.set_title(f"channel {channel} bs {i}")
+                    ax.set_xticks([]); ax.set_yticks([])
+            plt.tight_layout()
+            plt.show()
+        return attens
 
     def train(self):
         for i in range(self.output_channel):

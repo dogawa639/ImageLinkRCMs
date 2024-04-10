@@ -87,9 +87,9 @@ def get_models(model_names, nw_data=None, output_channel=None, config=None):
         elif model_name == "UNetDis":
             models.append(UNetDis(nw_data.prop_dim+emb_dim_enc, 1, output_channel, gamma=gamma, sn=True, ext_coeff=ext_coeff))
         elif model_name == "UNetDisStatic":
-            models.append(UNetDisStatic(nw_data.prop_dim+emb_dim_enc, 1, output_channel, gamma=gamma, sn=True, ext_coeff=ext_coeff))
+            models.append(UNetDisStatic(nw_data.prop_dim+emb_dim_enc, 1, output_channel, gamma=gamma, sn=True, ext_coeff=ext_coeff, depth=depth_dis))
         elif model_name == "UNetGen":
-            models.append(UNetGen(nw_data.prop_dim+emb_dim_enc, 1, sn=sn_gen))
+            models.append(UNetGen(nw_data.prop_dim+emb_dim_enc, 1, sn=sn_gen, depth=depth_gen))
         else:
             raise Exception("Unknown model name: {}".format(model_name))
 

@@ -193,14 +193,12 @@ class MeshImageData:
         res = []
         for idx, data in enumerate(self.data_list):
             tmp_dir = data["data_dir"]
-            for i in range(self.h_dim):
-                for j in range(self.w_dim):
-                    path = os.path.join(tmp_dir, f"{i}_{j}.png")
-                    if os.path.exists(path):
-                        image = Image.open(path)
-                        res.append(image)
-                    else:
-                        res.append(None)
+            path = os.path.join(tmp_dir, f"{i}_{j}.png")
+            if os.path.exists(path):
+                image = Image.open(path)
+                res.append(image)
+            else:
+                res.append(None)
         return res
 
     def load_mesh_images(self, i, j=None, d=0):

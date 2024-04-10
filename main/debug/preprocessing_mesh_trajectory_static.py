@@ -4,6 +4,7 @@ if __name__ == "__main__":
 
     from preprocessing.mesh import MeshNetwork
     from preprocessing.mesh_trajectory import MeshTrajStatic
+    print(os.getcwd())
 
     CONFIG = "../../config/config_test.ini"
     config = configparser.ConfigParser()
@@ -17,7 +18,8 @@ if __name__ == "__main__":
     GEOFILE = False
     TRAJECTORY = True
 
-    mnw_data = MeshNetwork((-69875.305966, 92588.464115, -66556.048456, 94636.347820), 16, 10, 0)
+    mnw_data = MeshNetwork((-69875.305966, 92588.464115, -66556.048456, 94636.347820), 32, 20, 0)
+    #mnw_data = MeshNetwork((-69875.305966, 92588.464115, -66556.048456, 94636.347820), 64, 40, 0)
     if GEOFILE:
         mnw_data.write_geo_file(utm_num, os.path.join(data_dir, "mesh.geojson"))
     if TRAJECTORY:
@@ -26,7 +28,7 @@ if __name__ == "__main__":
 
         print(traj_data.get_trip_nums())
         print(traj_data.get_aids())
-        traj_data.show_traj(0, 1000)
+        traj_data.show_traj(0, 53)
 
         input("Press Enter to continue...")
 
