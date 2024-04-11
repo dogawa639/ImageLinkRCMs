@@ -20,7 +20,7 @@ if __name__ == "__main__":
     from learning.mesh_airl_static import *
     from utility import *
 
-    CONFIG = "../../config/config_mesh_static.ini"
+    CONFIG = "../../config/config_mesh_static_noimage.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
     # general
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     ADDOUTPUT = True
     TRAIN = True
     TEST = True
-    SHOWATTEN = True
+    SHOWATTEN = False
     target_case = "20240410130218"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
@@ -178,7 +178,7 @@ if __name__ == "__main__":
 
     if TRAIN:
         print("Pre training start")
-        airl.pretrain_models(CONFIG, 10, bs, lr_g, shuffle, train_ratio=train_ratio)
+        airl.pretrain_models(CONFIG, 30, bs, lr_g, shuffle, train_ratio=train_ratio)
         print("Training start")
         airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
 

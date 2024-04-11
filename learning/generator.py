@@ -252,7 +252,7 @@ class UNetGen(nn.Module):
         self.context_num = context_num
         self.total_feature = feature_num + context_num
 
-        self.unet = UNet(self.total_feature, 1, sn=sn, dropout=dropout, pool_type="none", depth=depth, act_fn=lambda x : -softplus(x))
+        self.unet = UNet(self.total_feature, 1, sn=sn, dropout=dropout, pool_type="none", depth=depth, act_fn=lambda x : torch.sin(x))
 
     def forward(self, inputs):
         # inputs: (bs, total_feature, 2d+1, 2d+1)
