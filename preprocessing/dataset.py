@@ -452,7 +452,24 @@ class MeshDatasetStatic:
 
     def get_context_mi(self):
         return [mi(self.context[channel].clone().detach().numpy().flatten(), self.next_state[channel].clone().detach().numpy().flatten()) for channel in range(self.output_channel)]
+    
+    # for twin experiment
+    def get_peseudo_dataset(self, num_d_points, params):
+        # params: parameters for each propaties
+        if len(params) != self.prop_dim + 1:
+            raise Exception("The number of parameters is not correct.")
+        new_data = MeshDatasetStatic(self.mesh_traj_data, self.d)
 
+        # set state, context, next_state, mask, idxs
+        d_points = np.stack([np.random.randint(self.mnw_data.h_dim, size=num_d_points), np.random.randint(self.mnw_data.w_dim, size=num_d_points)], axis=1)
+        for d_point in d_points:
+            dist = self.mnw_data.distance_from(d_point)
+            for x_idx in range(1, self.nmw_data.w_dim - 1):
+                for y_idx in range(1, self.nmw_data.h_dim - 1):
+                    
+        
+
+    # inside function
     def _set_values(self):
         self.state = [torch.zeros((self.trip_nums[channel], self.prop_dim, 2 * self.d + 1, 2 * self.d + 1),
                                  dtype=torch.float32, requires_grad=False) for channel in range(self.output_channel)]

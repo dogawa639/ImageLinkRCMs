@@ -301,6 +301,7 @@ class MeshTrajStatic:
             fig.savefig(save_path)
         plt.show()
 
+    # inside function
     def _set_mesh_idxs(self):
         self.mesh_idxs = []  # list(df[ID, *idx, *idx_next, d_x, d_y])
         for i, data in enumerate(self.data_list):
