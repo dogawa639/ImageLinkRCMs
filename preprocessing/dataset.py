@@ -415,8 +415,19 @@ class MeshDatasetStatic:
 
     def split_into(self, ratio):
         # ratio: [train, test, validation]
-        mesh_traj_data = self.mesh_traj_data.split_into(ratio)
-        return [MeshDatasetStatic(mesh_traj_data[i], self.d) for i in range(len(ratio))]
+        res = [MeshDatasetStatic(self.mesh_traj_data, self.d) for _ in range(len(ratio))]
+        shuffled_idx = [torch.randperm(num) for num in self.trip_nums]
+        accum_ratio = np.array([0] + list(np.cumsum(ratio)))
+        for i in range(len(ratio)):
+            for channel in range(self.output_channel):
+                idx_min = int(accum_ratio[i] * self.trip_nums[channel])
+                idx_max = int(accum_ratio[i+1] * self.trip_nums[channel])
+                res[i].state[channel] = self.state[channel][shuffled_idx[channel][idx_min:idx_max]]
+                res[i].context[channel] = self.context[channel][shuffled_idx[channel][idx_min:idx_max]]
+                res[i].next_state[channel] = self.next_state[channel][shuffled_idx[channel][idx_min:idx_max]]
+                res[i].idxs[channel] = self.idxs[channel][shuffled_idx[channel][idx_min:idx_max]]
+
+        return res
 
     def get_sub_datasets(self):
         return [MeshDatasetStaticSub(self.state[channel], self.context[channel], self.next_state[channel], self.mask, self.idxs[channel]) for channel in range(self.output_channel)]
@@ -454,20 +465,53 @@ class MeshDatasetStatic:
         return [mi(self.context[channel].clone().detach().numpy().flatten(), self.next_state[channel].clone().detach().numpy().flatten()) for channel in range(self.output_channel)]
     
     # for twin experiment
-    def get_peseudo_dataset(self, num_d_points, params):
-        # params: parameters for each propaties
+    def get_pseudo_dataset(self, num_d_points, params):
+        # params: parameters for each propaties, list or ndarray
         if len(params) != self.prop_dim + 1:
             raise Exception("The number of parameters is not correct.")
         new_data = MeshDatasetStatic(self.mesh_traj_data, self.d)
 
+        row_per_d = (self.mnw_data.h_dim - 2 * self.d) * (self.mnw_data.w_dim - 2 * self.d)
+        row_total = row_per_d * num_d_points
+
+        state = [torch.zeros((row_total, self.prop_dim, 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32, requires_grad=False)]
+        context = [torch.full((row_total, 1, 2 * self.d + 1, 2 * self.d + 1), 5000, dtype=torch.float32, requires_grad=False)]
+        next_state = [torch.zeros((row_total, 2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32, requires_grad=False)]
+        mask= torch.ones((2 * self.d + 1, 2 * self.d + 1), dtype=torch.float32, requires_grad=False)
+        mask[self.d, self.d] = 0
+        idxs = [torch.zeros((row_total, 2), dtype=torch.long, requires_grad=False)]
+
         # set state, context, next_state, mask, idxs
         d_points = np.stack([np.random.randint(self.mnw_data.h_dim, size=num_d_points), np.random.randint(self.mnw_data.w_dim, size=num_d_points)], axis=1)
-        for d_point in d_points:
-            dist = self.mnw_data.distance_from(d_point)
-            for x_idx in range(1, self.nmw_data.w_dim - 1):
-                for y_idx in range(1, self.nmw_data.h_dim - 1):
-                    
-        
+        for i, d_point in enumerate(d_points):
+            d_coord = tuple(self.mnw_data.cells[d_point[0]][d_point[1]].center)
+            dist = tensor(self.mnw_data.distance_from(d_coord))
+            for x_idx in range(self.d, self.mnw_data.w_dim - self.d):
+                for y_idx in range(self.d, self.mnw_data.h_dim - self.d):
+                    min_y = y_idx - self.d
+                    max_y = y_idx + self.d + 1
+                    min_x = x_idx - self.d
+                    max_x = x_idx + self.d + 1
+
+                    row_tmp = i * row_per_d + (y_idx - self.d) * (self.mnw_data.w_dim - 2 * self.d) + x_idx - self.d
+                    state[0][row_tmp, :, :, :] = self.common_state[:, min_y:max_y, min_x:max_x]
+                    context[0][row_tmp, 0, :, :] = dist[min_y:max_y, min_x:max_x]
+                    idxs[0][row_tmp, 0] = y_idx
+                    idxs[0][row_tmp, 1] = x_idx
+
+        logits = (torch.cat((state[0], context[0]), dim=1) * tensor(params, dtype=torch.float32).view(1, -1, 1, 1)).sum(dim=1)  # (bs, 2d+1, 2d+1)
+        logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32))
+        pi = F.softmax(logits.view(logits.shape[0], -1), dim=1)  # (bs, (2d+1)^2)
+        next_state_idx = torch.multinomial(pi, num_samples=1).view(row_total)
+        next_state[0][torch.arange(row_total), next_state_idx // (2 * self.d + 1), next_state_idx % (2 * self.d + 1)] = 1.0
+
+        new_data.state = state
+        new_data.context = context
+        new_data.next_state = next_state
+        new_data.mask = mask
+        new_data.idxs = idxs
+
+        return new_data
 
     # inside function
     def _set_values(self):

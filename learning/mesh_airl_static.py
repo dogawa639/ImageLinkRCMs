@@ -112,7 +112,10 @@ class MeshAIRLStatic:
                     logits_other = [self.generators[i](inputs_other[i]) for i in range(self.output_channel) if i != channel]
                     logits_other = [torch.where(mask > 0, logits_tmp, tensor(-9e15, dtype=torch.float32,
                                                                   device=logits_tmp.device)) for logits_tmp in logits_other]
-                    pi_other = torch.cat([self.get_pi_from_logits(logits_tmp).unsqueeze(1) for logits_tmp in logits_other], dim=1)  # detached
+                    if len(logits_other) > 0:
+                        pi_other = torch.cat([self.get_pi_from_logits(logits_tmp).unsqueeze(1) for logits_tmp in logits_other], dim=1)  # detached, tensor(bs, output_channel-1, 2d+1, 2d+1)
+                    else:
+                        pi_other = torch.zeros((state.shape[0], 0, state.shape[2], state.shape[3]), dtype=torch.float32, device=state.device)
 
                     # get fake next state
                     next_idxs = torch.multinomial(pi.clone().detach().view(pi.shape[0], -1), 1).squeeze(dim=1)  # (bs)
@@ -208,7 +211,13 @@ class MeshAIRLStatic:
                     logits_other = [torch.where(mask > 0, logits_tmp, tensor(-9e15, dtype=torch.float32,
                                                                              device=logits_tmp.device)) for logits_tmp
                                     in logits_other]
-                    pi_other = torch.cat([self.get_pi_from_logits(logits_tmp).unsqueeze(1) for logits_tmp in logits_other], dim=1)  # detached
+                    if len(logits_other) > 0:
+                        pi_other = torch.cat(
+                            [self.get_pi_from_logits(logits_tmp).unsqueeze(1) for logits_tmp in logits_other],
+                            dim=1)  # detached, tensor(bs, output_channel-1, 2d+1, 2d+1)
+                    else:
+                        pi_other = torch.zeros((state.shape[0], 0, state.shape[2], state.shape[3]), dtype=torch.float32,
+                                               device=state.device)
 
                     # loss function calculation
                     next_state_epsilon = torch.full_like(next_state, epsilon)
@@ -371,7 +380,7 @@ class MeshAIRLStatic:
             ll0 = 0.0
             bs_all = 0
             bs_count = 0
-            showval = 3
+            showval = 5
             for state, context, next_state, mask, idx in dataloaders_test[channel]:  # batch
                 # state: (bs, prop_dim, 2d+1, 2d+1)
 
@@ -401,8 +410,13 @@ class MeshAIRLStatic:
                 logits_other = [torch.where(mask > 0, logits_tmp, tensor(-9e15, dtype=torch.float32,
                                                                          device=logits_tmp.device)) for logits_tmp
                                 in logits_other]
-                pi_other = torch.cat([self.get_pi_from_logits(logits_tmp).unsqueeze(1) for logits_tmp in logits_other],
-                                     dim=1)  # detached
+                if len(logits_other) > 0:
+                    pi_other = torch.cat(
+                        [self.get_pi_from_logits(logits_tmp).unsqueeze(1) for logits_tmp in logits_other],
+                        dim=1)  # detached, tensor(bs, output_channel-1, 2d+1, 2d+1)
+                else:
+                    pi_other = torch.zeros((state.shape[0], 0, state.shape[2], state.shape[3]), dtype=torch.float32,
+                                           device=state.device)
 
                 # loss function calculation
                 next_state_epsilon = torch.full_like(next_state, epsilon)
@@ -534,7 +548,7 @@ class MeshAIRLStatic:
         if showval > 0:
             showval = min(inputs.shape[0], showval)
             fig = plt.figure(figsize=(8, 1 * showval))
-            showprop = 6
+            showprop = min(6, self.mnw_data.prop_dim+1)
             col = 4 + showprop
             for j in range(showval):
                 ax = fig.add_subplot(showval, col, j * col + 1)  # pi_q, pi_g, next_state, mask
