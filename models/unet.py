@@ -38,11 +38,13 @@ class UNetBlock(nn.Module):
         self.conv1 = BaseConv(in_channels, out_channels, sn, dropout)
         if pool_type == "max":
             self.pool = nn.MaxPool2d(2)
+            self.upconv = nn.ConvTranspose2d(out_channels, out_channels // 2, 2, stride=2)
         elif pool_type == "avg":
             self.pool = nn.AvgPool2d(2)
+            self.upconv = nn.ConvTranspose2d(out_channels, out_channels // 2, 2, stride=2)
         else:
             self.pool = nn.Identity()
-
+            self.upconv = nn.ConvTranspose2d(out_channels, out_channels // 2, 1, stride=1)
         self.upconv = nn.ConvTranspose2d(out_channels, out_channels // 2, 2, stride=2)
         self.conv2 = BaseConv(out_channels // 2 + in_channels, in_channels, sn, dropout)
         self.sub = sub
@@ -83,7 +85,7 @@ class UNet(nn.Module):
         self.conv0 = BaseConv(input_channels, 64, sn=sn)
         self.blocks = nn.ModuleList([UNetBlock(64 * 2 ** (depth - 1), 128 * 2 ** (depth - 1), sn=sn, pool_type=pool_type, dropout=dropout)])  # (128 * 2^(depth - 1), H/2^depth, W/2^depth)
         for i in range(depth - 2, - 1, -1):
-            self.blocks.append(UNetBlock(64 * 2 ** i, 128 * 2 ** i, sub=self.blocks[-1], sn=sn, dropout=dropout))  # (128 * 2^i, H/2^(i+1), W/2^(i+1))
+            self.blocks.append(UNetBlock(64 * 2 ** i, 128 * 2 ** i, sub=self.blocks[-1], sn=sn, pool_type=pool_type, dropout=dropout))  # (128 * 2^i, H/2^(i+1), W/2^(i+1))
 
         self.out_conv = nn.Conv2d(64, output_channels, 1)
 

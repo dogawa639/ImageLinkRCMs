@@ -134,8 +134,8 @@ if __name__ == "__main__":
     mesh_traj_data = mesh_traj_data.split_into([0.1])[0]
     dataset = MeshDatasetStatic(mesh_traj_data, 1)
     # create pseudo dataset for twin experiment overwrite original data
-    num_d_train = 20
-    num_d_test = 10
+    num_d_train = 50
+    num_d_test = 20
     params = [0., 0., 0., -1.]
     print(f"Create pseudo dataset train & val num_d: ({num_d_train}) and test num_d: ({num_d_test})")
     print(f"  params: {params}")
@@ -186,7 +186,7 @@ if __name__ == "__main__":
 
     if TRAIN:
         print("Pre training start")
-        airl.pretrain_models(CONFIG, 100, bs, lr_g, shuffle, train_ratio=train_ratio)
+        airl.pretrain_models(CONFIG, 1, bs, lr_g, shuffle, train_ratio=train_ratio)
         print("Training start")
         airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
 
