@@ -163,7 +163,7 @@ class MeshAIRLStatic:
 
                         del log_d_g, log_d_d, loss_d, loss_g
                 # update learning rate
-                if e > 0 and e % 5 == 0:
+                if e > 0 and e % 10 == 0:
                     gamma = 0.5
                     for param_group in optimizer_gs[channel].param_groups:
                         param_group['lr'] = param_group['lr'] * gamma
