@@ -235,11 +235,11 @@ class MeshAIRLStatic:
 
                     if e % 10 == 0:
                         # show intermediate result samples
-                        ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(inputs, pi_other, next_state,
+                        ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_criteria(inputs, pi_other, next_state,
                                                                                           mask, channel, showval=showval)
                         showval = 0
                     else:
-                        ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(inputs, pi_other, next_state, mask, channel)
+                        ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_criteria(inputs, pi_other, next_state, mask, channel)
                     ll += ll_tmp.detach().cpu().item()
                     dist += d_tmp.detach().cpu().numpy().sum()
                     tp += tp_tmp.detach().cpu().item()
@@ -432,7 +432,7 @@ class MeshAIRLStatic:
                 mode_loss_g.append(loss_g.clone().detach().cpu().item())
                 mode_loss_d.append(loss_d.clone().detach().cpu().item())
 
-                ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(inputs, pi_other, next_state, mask,
+                ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_criteria(inputs, pi_other, next_state, mask,
                                                                                   channel, showval=showval)
                 showval = 0
 
@@ -506,7 +506,7 @@ class MeshAIRLStatic:
 
         return (log_d_g, log_1_d_g), (log_d_d, log_1_d_d)
 
-    def get_creteria(self, inputs, pi_other, next_state, mask, i, showval=0):
+    def get_criteria(self, inputs, pi_other, next_state, mask, i, showval=0):
         # ll, TP, FP, FN, TN: scalar
         # f_val, util, val: (bs, 2d+1, 2d+1)
         # ext: (bs, num_agents, 2d+1, 2d+1)
@@ -571,7 +571,7 @@ class MeshAIRLStatic:
                     ax.set_title(f"Prop {k} {j}")
                     ax.set_xticks([]); ax.set_yticks([])
             plt.tight_layout()
-            plt.savefig(os.path.join(self.model_dir, f"creteria{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png"))
+            plt.savefig(os.path.join(self.model_dir, f"criteria{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.png"))
             plt.clf()
             plt.close()
 

@@ -172,7 +172,7 @@ class MeshAIRL:
                     mode_loss_g_val.append(loss_g.clone().detach().cpu().item())
                     mode_loss_d_val.append(loss_d.clone().detach().cpu().item())
 
-                    ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(inputs, next_state, mask, positions, pis, channel)
+                    ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_criteria(inputs, next_state, mask, positions, pis, channel)
                     ll += ll_tmp.detach().cpu().item()
                     dist += d_tmp.detach().cpu().numpy().sum()
                     tp += tp_tmp.detach().cpu().item()
@@ -262,7 +262,7 @@ class MeshAIRL:
                                                   channel)  # discriminator inference performed inside
                 loss_g, loss_d = self.loss(log_d_g, log_d_d, self.hinge_loss)
 
-                ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(inputs, next_state, mask, positions, pis,
+                ll_tmp, d_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_criteria(inputs, next_state, mask, positions, pis,
                                                                            channel)
                 ll += ll_tmp.detach().cpu().item()
                 dist += d_tmp.detach().cpu().numpy().sum()
@@ -323,7 +323,7 @@ class MeshAIRL:
 
         return (log_d_g, log_1_d_g), (log_d_d, log_1_d_d)
 
-    def get_creteria(self, inputs, next_state, mask, positions, pis, i):
+    def get_criteria(self, inputs, next_state, mask, positions, pis, i):
         # ll, TP, FP, FN, TN: scalar
         # f_val, util, val: (bs, 2d+1, 2d+1)
         # ext: (bs, num_agents, 2d+1, 2d+1)

@@ -195,7 +195,7 @@ class AIRL:
                     mode_loss_g_val.append(loss_g.clone().detach().cpu().item())
                     mode_loss_d_val.append(loss_d.clone().detach().cpu().item())
 
-                    ll_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(batch_real, pi, i, w=w)
+                    ll_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_criteria(batch_real, pi, i, w=w)
                     ll += ll_tmp.detach().cpu().item()
                     tp += tp_tmp.detach().cpu().item()
                     fp += fp_tmp.detach().cpu().item()
@@ -288,7 +288,7 @@ class AIRL:
                 mode_loss_g_test.append(loss_g.clone().detach().cpu().item())
                 mode_loss_d_test.append(loss_d.clone().detach().cpu().item())
 
-                ll_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_creteria(batch_real, pi, i, w=w)
+                ll_tmp, tp_tmp, fp_tmp, tn_tmp, fn_tmp = self.get_criteria(batch_real, pi, i, w=w)
                 ll += ll_tmp.detach().cpu().item()
                 tp += tp_tmp.detach().cpu().item()
                 fp += fp_tmp.detach().cpu().item()
@@ -463,7 +463,7 @@ class AIRL:
     #        return f_val
 
 
-    def get_creteria(self, batch, pi, i, w=None):
+    def get_criteria(self, batch, pi, i, w=None):
         # ll, TP, FP, FN, TN
         if self.use_index:
             input, mask, next_mask, _, _ = batch
