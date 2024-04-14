@@ -13,7 +13,7 @@ import pyproj
 
 from PIL import Image
 
-__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "heron", "heron_vertex", "mutual_information", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv", "Coord", "KalmanFilter", "Hungarian"]
+__all__ = ["load_json", "dump_json", "load_pickle", "dump_pickle", "save_class_val", "load_class_val", "heron", "heron_vertex", "mutual_information", "write_2d_ndarray", "write_1d_array", "load_2d_ndarray", "load_1d_array", "read_csv", "Coord", "KalmanFilter", "Hungarian"]
 
 
 def load_json(file):
@@ -36,6 +36,18 @@ def load_pickle(file):
 def dump_pickle(data, file):
     with open(file, "wb") as f:
         pickle.dump(data, f)
+
+
+def save_class_val(obj, path):
+    val = vars(obj)
+    dump_pickle(val, path)
+
+
+def load_class_val(obj, path):
+    val = load_pickle(path)
+    for key in val:
+        setattr(obj, key, val[key])
+    return obj
 
 
 def heron(a, b, c):

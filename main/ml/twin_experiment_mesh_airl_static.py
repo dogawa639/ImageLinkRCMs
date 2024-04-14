@@ -33,6 +33,7 @@ if __name__ == "__main__":
     mask_path = read_geo["mask_path"]
     # data
     read_data = config["DATA"]
+    data_dir = read_data["data_dir"]
     pp_path = json.loads(read_data["pp_path"])
     image_data_path = read_data["image_data_path"]
     onehot_data_path = read_data["onehot_data_path"]
@@ -77,6 +78,8 @@ if __name__ == "__main__":
     IMAGE = False
     USESMALL = True
     ADDOUTPUT = True
+    SAVEDATA = True
+    LOADDATA = True
     TRAIN = True
     TEST = True
     SHOWATTEN = False
@@ -141,6 +144,16 @@ if __name__ == "__main__":
     print(f"  params: {params}")
     dataset_train = dataset.get_pseudo_dataset(num_d_train, params)
     dataset_test = dataset.get_pseudo_dataset(num_d_test, params)
+    if SAVEDATA:
+        data_path_train = os.path.join(data_dir, "twin_exp/data_train.pkl")
+        data_path_test = os.path.join(data_dir, "twin_exp/data_test.pkl")
+        save_class_val(dataset_train, data_path_train)
+        save_class_val(dataset_test, data_path_test)
+    if LOADDATA:
+        data_path_train = os.path.join(data_dir, "twin_exp/data_train.pkl")
+        data_path_test = os.path.join(data_dir, "twin_exp/data_test.pkl")
+        dataset_train = load_class_val(dataset_train, data_path_train)
+        dataset_test = load_class_val(dataset_test, data_path_test)
 
     # normalize state and context
     print("Normalize state and context")
