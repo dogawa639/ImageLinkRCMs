@@ -380,7 +380,7 @@ class MeshAIRLStatic:
             ll0 = 0.0
             bs_all = 0
             bs_count = 0
-            showval = 5
+            showval = 10
             for state, context, next_state, mask, idx in dataloaders_test[channel]:  # batch
                 # state: (bs, prop_dim, 2d+1, 2d+1)
 
@@ -495,13 +495,11 @@ class MeshAIRLStatic:
         f_val_clone_masked = f_val_masked.clone().detach()
         pi_clone = pi.clone().detach()
 
-        next_idxs = torch.multinomial(pi_clone.view(pi_clone.shape[0], -1), 1).squeeze(dim=1)  # (bs)
-        next_state_fake = torch.zeros_like(next_state).view(next_state.shape[0], -1)
-        next_state_fake[torch.arange(next_state.shape[0]), next_idxs] = 1.0
-        next_state_fake = next_state_fake.view(next_state.shape)
+        pi_clone_reshaped = pi_clone.reshape(pi_clone.shape[0], -1)
+        next_state_fake = (pi_clone_reshaped == pi_clone_reshaped.max(dim=1, keepdim=True)[0]).reshape(*next_state.shape)
 
-        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi)) * next_state_fake
-        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi)) * next_state_fake
+        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi)) * pi
+        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi)) * pi
 
         log_d_d = (f_val_masked - log(torch.exp(f_val_masked) + pi_clone)) * next_state
         log_1_d_d = (log(pi_clone) - log(torch.exp(f_val_masked) + pi_clone)) * next_state_fake
@@ -521,9 +519,9 @@ class MeshAIRLStatic:
         logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32, device=logits.device))
         pi_g = F.softmax(logits.reshape(inputs.shape[0], -1), dim=-1)  # (bs, (2*d+1)^2)
 
-        ll = log((pi_q * next_state.reshape(pi_q.shape)).sum(dim=-1)).sum()
+        ll = log((pi_g * next_state.reshape(pi_q.shape)).sum(dim=-1)).sum()
 
-        pred_state = (pi_q == pi_q.max(dim=1, keepdim=True)[0]).reshape(*q.shape).to(torch.float32)  # (bs, 2d+1, 2d+1)
+        pred_state = (pi_g == pi_g.max(dim=1, keepdim=True)[0]).reshape(*q.shape).to(torch.float32)  # (bs, 2d+1, 2d+1)
 
         x_range = torch.arange(pred_state.shape[-1]).reshape(1, 1, -1).to(pred_state.device)
         y_range = torch.arange(pred_state.shape[-1]).reshape(1, -1, 1).to(pred_state.device)

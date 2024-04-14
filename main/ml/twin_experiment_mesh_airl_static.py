@@ -80,7 +80,7 @@ if __name__ == "__main__":
     TRAIN = True
     TEST = True
     SHOWATTEN = False
-    target_case = "20240410130218"  # only used when ADDOUTPUT is False
+    target_case = "20240414111152"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
