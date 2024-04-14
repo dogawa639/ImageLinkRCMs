@@ -498,8 +498,8 @@ class MeshAIRLStatic:
         pi_clone_reshaped = pi_clone.reshape(pi_clone.shape[0], -1)
         next_state_fake = (pi_clone_reshaped == pi_clone_reshaped.max(dim=1, keepdim=True)[0]).reshape(*next_state.shape)
 
-        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi)) * pi
-        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi)) * pi
+        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi_clone)) * pi
+        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi_clone)) * pi
 
         log_d_d = (f_val_masked - log(torch.exp(f_val_masked) + pi_clone)) * next_state
         log_1_d_d = (log(pi_clone) - log(torch.exp(f_val_masked) + pi_clone)) * next_state_fake
