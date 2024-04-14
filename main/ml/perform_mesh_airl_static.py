@@ -20,7 +20,7 @@ if __name__ == "__main__":
     from learning.mesh_airl_static import *
     from utility import *
 
-    CONFIG = "../../config/config_mesh_static_noimage.ini"
+    CONFIG = "../../config/config_mesh_static.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
     # general
