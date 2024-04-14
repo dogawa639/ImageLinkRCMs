@@ -80,7 +80,7 @@ if __name__ == "__main__":
     TRAIN = True
     TEST = True
     SHOWATTEN = False
-    target_case = "20240410130218"  # only used when ADDOUTPUT is False
+    target_case = "20240415031836"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -190,7 +190,7 @@ if __name__ == "__main__":
 
     if SHOWATTEN:
     #  show attention map
-        if not  os.path.exists(os.path.join(output_dir, "atten")):
+        if not os.path.exists(os.path.join(output_dir, "atten")):
             os.mkdir(os.path.join(output_dir, "atten"))
         for row in range(h_dim):
             for col in range(w_dim):

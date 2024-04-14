@@ -69,6 +69,18 @@ class CNNEnc(nn.Module):
         x = self.resnet50[num_source](self.norm0(patch))   # (bs2, 1000)
         return x
 
+    def save(self, model_dir, i=None):
+        if i is None:
+            torch.save(self.state_dict(), model_dir + "/cnnenc.pth")
+        else:
+            torch.save(self.state_dict(), model_dir + f"/cnnenc_{i}.pth")
+
+    def load(self, model_dir, i=None):
+        if i is None:
+            self.load_state_dict(torch.load(model_dir + "/cnnenc.pth"))
+        else:
+            self.load_state_dict(torch.load(model_dir + f"/cnnenc_{i}.pth"))
+
 
 class ViTEnc(nn.Module):
     def __init__(self, patch_size, vit_patch_size, emb_dim, mid_dim=1000, num_source=1, sln=True, w_dim=10, depth=6, heads=1, dropout=0.0, output_atten=False):
