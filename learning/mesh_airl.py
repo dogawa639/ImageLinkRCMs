@@ -315,8 +315,9 @@ class MeshAIRL:
         f_val_masked = f_val * mask
         f_val_clone_masked = f_val_masked.clone().detach()
         pi_clone = pi.clone().detach()
-        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi)) * pi_clone
-        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi)) * pi_clone
+
+        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi_clone)) * pi
+        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi_clone)) * pi
 
         log_d_d = (f_val_masked - log(torch.exp(f_val_masked) + pi_clone)) * next_state
         log_1_d_d = (log(pi_clone) - log(torch.exp(f_val_masked) + pi_clone)) * pi_clone
@@ -333,7 +334,11 @@ class MeshAIRL:
         q = torch.where(mask > 0, q, tensor(-9e15, dtype=torch.float32, device=q.device))
         # choose maximum q
         pi_q = F.softmax(q.view(q.shape[0], -1), dim=-1)  # (bs, (2*d+1)^2)
-        ll = log((pi_q.reshape(*q.shape) * next_state).sum(dim=-1)).sum()
+        logits = self.generators[i](inputs)  # (bs, 2*d+1, 2*d+1)
+        logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32, device=logits.device))
+        pi_g = F.softmax(logits.reshape(inputs.shape[0], -1), dim=-1)  # (bs, (2*d+1)^2)
+
+        ll = log((pi_g.reshape(*q.shape) * next_state).sum(dim=-1)).sum()
 
         pred_state = (pi_q == pi_q.max(dim=1, keepdim=True)[0]).reshape(*q.shape).to(torch.float32)  # (bs, 2d+1, 2d+1)
 

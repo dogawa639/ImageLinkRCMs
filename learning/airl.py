@@ -443,13 +443,14 @@ class AIRL:
         f_val_masked = torch.where(mask > 0.99, f_val, tensor(0.0, dtype=torch.float32, device=f_val.device))
         f_val_clone_masked = f_val_masked.clone().detach()
         pi = torch.where(mask > 0.99, pi[:, i, :, :], tensor(0.0, dtype=torch.float32, device=pi.device))
-        pi_i_clone = pi.clone().detach()
-        # f_val: (bs, oc, *choice_space), pi: (bs, oc, *choice_space)
-        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi))  # * pi_i_clone
-        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi))  # * pi_i_clone
+        pi_clone = pi.clone().detach()
 
-        log_d_d = (f_val_masked - log(torch.exp(f_val_masked) + pi_i_clone))  # * next_link
-        log_1_d_d = (log(pi_i_clone) - log(torch.exp(f_val_masked) + pi_i_clone))  # * pi_i_clone
+        # f_val: (bs, oc, *choice_space), pi: (bs, oc, *choice_space)
+        log_d_g = (f_val_clone_masked - log(torch.exp(f_val_clone_masked) + pi_clone)) * pi
+        log_1_d_g = (log(pi) - log(torch.exp(f_val_clone_masked) + pi_clone)) * pi
+
+        log_d_d = (f_val_masked - log(torch.exp(f_val_masked) + pi_clone)) * next_link
+        log_1_d_d = (log(pi_clone) - log(torch.exp(f_val_masked) + pi_clone)) * pi_clone
 
         return (log_d_g, log_1_d_g), (log_d_d, log_1_d_d)
 
@@ -480,9 +481,20 @@ class AIRL:
             mask = mask.view(mask.shape[0], -1)  # (*, 9)
             next_mask = next_mask.view(next_mask.shape[0], -1)  # (*, 9)
         pi_q = F.softmax(q, dim=-1)
-        ll = log((pi_q * next_mask).sum(dim=-1)).sum()
+        if self.sln:
+            logits = self.generator(input, w=w)  # raw_data_fake requires_grad=True
+        else:
+            logits = self.generator(input)  # raw_data_fake requires_grad=True
+        mask = mask.unsqueeze(1)
+        if self.use_index:
+            mask = mask.view(-1, 1, logits.shape[-2], logits.shape[-1])
+        logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32,
+                                                      device=logits.device))
+        pi_g = self.get_pi_from_logits(logits)[:, i, :, :].view(logits.shape[0], -1)  # (bs, 9)
+        ll = log((pi_g * next_mask.view(pi_g.shape)).sum(dim=-1)).sum()
 
-        pred_mask = (q == q.max(dim=1, keepdim=True)[0]).to(torch.float32)
+        pred_mask = (pi_g == pi_g.max(dim=1, keepdim=True)[0]).to(torch.float32)
+        mask = mask.view(*next_mask.shape)
         tp = (next_mask * pred_mask).sum()
         fp = (mask * (1-next_mask) * pred_mask).sum()
         tn = (mask * (1-next_mask) * (1-pred_mask)).sum()
