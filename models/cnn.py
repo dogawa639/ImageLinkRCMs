@@ -7,7 +7,7 @@ from torch.nn.utils import spectral_norm
 
 import itertools
 
-__all__ = ["CNN3x3", "CNN1x1"]
+__all__ = ["CNN3x3", "CNN1x1", "ResNet"]
 
 
 class CNN3x3(nn.Module):
@@ -107,5 +107,66 @@ class CNN1x1(nn.Module):
 
         return self.act_fn(self.sequence2(self.sequence1(x)))  # (bs, channels[-1], H, W)
 
+
+class BaseConv(nn.Module):
+    def __init__(self, in_channels, out_channels, sn=False, dropout=0.0):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False)
+        if sn:
+            self.conv1 = spectral_norm(self.conv1)
+            self.conv2 = spectral_norm(self.conv2)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.act_fn = nn.ReLU(inplace=True)
+        self.dropout = nn.Dropout2d(dropout)
+
+        self.sequence = nn.Sequential(
+                self.conv1,
+                self.bn1,
+                self.act_fn,
+                self.dropout,
+                self.conv2,
+                self.bn2,
+                self.act_fn
+        )
+
+    def forward(self, x):
+        return self.sequence(x)
+
+
+class ResNet(nn.Module):
+    def __init__(self, input_channels, num_classes, depth=4, sn=False, dropout=0.0, act_fn=lambda x : x):
+        # pool_type: none, max or avg
+        super().__init__()
+        self.input_channels = input_channels
+        self.num_classes = num_classes
+        self.act_fn = act_fn
+        self.depth = depth
+
+        self.conv0 = nn.Conv2d(input_channels, 64, 7, stride=2, padding=3, bias=False)
+        self.norm0 = nn.BatchNorm2d(64)
+        self.maxpool = nn.MaxPool2d(3, stride=2, padding=1)
+
+        self.blocks = nn.ModuleList([])
+        self.identitys = nn.ModuleList([])
+        for i in range(depth):
+            self.blocks.append(BaseConv(64 * 2 ** i, 128 * 2 ** i, sn=sn, dropout=dropout))  # (128 * 2^i, H/2^(i+1), W/2^(i+1))
+            self.identitys.append(nn.Conv2d(64 * 2 ** i, 128 * 2 ** i, 1, bias=False))
+
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.out_fn = nn.Linear(128 * 2 ** (depth-1), num_classes)
+
+    def forward(self, x):
+        x = self.conv0(x)
+        x = self.norm0(x)
+        x = self.act_fn(x)
+        x = self.maxpool(x)
+        for i in range(self.depth):
+            x = self.blocks[i](x) + self.identitys[i](x)
+        x = self.avgpool(x)
+        x = x.view(x.size(0), -1)
+        x = self.out_fn(x)
+        return x
 
 

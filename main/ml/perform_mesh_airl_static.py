@@ -80,12 +80,12 @@ if __name__ == "__main__":
     ADDOUTPUT = False
     SAVEDATA = True
     LOADDATA = True
-    TRAIN = False
+    TRAIN = True
     TEST = False
     SHOWATTEN = False
     SHOWSHAP = False
     SHOWPATH = True
-    target_case = "20240415100832"  # only used when ADDOUTPUT is False
+    target_case = "20240415145450"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:

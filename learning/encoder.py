@@ -2,6 +2,7 @@ import torch
 from torch import tensor, nn, optim
 import torch.nn.functional as F
 from models.deeplabv3 import resnet50, ResNet50_Weights
+from models.cnn import ResNet
 from models.transformer import TransformerEncoder
 from models.vit import ViT
 from models.gnn import GAT
@@ -25,7 +26,7 @@ class CNNEnc(nn.Module):
         self.w_dim = w_dim
         self.mid_dim = mid_dim
 
-        self.resnet50 = nn.ModuleList([resnet50(weights=ResNet50_Weights.DEFAULT, num_classes=mid_dim) for _ in range(num_source)])
+        self.resnet50 = nn.ModuleList([ResNet(3, num_classes=mid_dim) for _ in range(num_source)])
 
         self.lin = nn.ModuleList([FF(self.mid_dim, emb_dim, self.mid_dim*2, bias=True) for _ in range(num_source)])
         self.norm0 = nn.LayerNorm(patch_size)
@@ -66,7 +67,8 @@ class CNNEnc(nn.Module):
         # satellite: (bs2, c, h, width) or (c, h, width)
         if patch.dim() == 3:
             patch = patch.unsqueeze(0)  # (1, c, h, w)
-        x = self.resnet50[num_source](self.norm0(patch))   # (bs2, 1000)
+        patch = self.norm0(patch)
+        x = self.resnet50[num_source](patch)   # (bs2, 1000)
         return x
 
     def save(self, model_dir, i=None):
