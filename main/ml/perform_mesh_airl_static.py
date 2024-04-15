@@ -78,14 +78,18 @@ if __name__ == "__main__":
     IMAGE = False
     USESMALL = True
     ADDOUTPUT = False
-    SAVEDATA = True
+    SAVEDATA = False
     LOADDATA = True
     TRAIN = True
     TEST = False
     SHOWATTEN = False
     SHOWSHAP = False
     SHOWPATH = True
+<<<<<<< Updated upstream
     target_case = "20240415145450"  # only used when ADDOUTPUT is False
+=======
+    target_case = "20240415132502"  # only used when ADDOUTPUT is False
+>>>>>>> Stashed changes
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -134,7 +138,7 @@ if __name__ == "__main__":
         mesh_traj_data = MeshTrajStatic(pp_path_small, mnw_data)
     else:
         mesh_traj_data = MeshTrajStatic(pp_path, mnw_data, pp_path_small)  # write down the trimmed data into the pp_path_small
-    print(f"Split dataset into train & val ({train_ratio / 10}) and test ({(1 - train_ratio) / 10})")
+    print(f"Split dataset into train & val ({train_ratio / 5}) and test ({(1 - train_ratio) / 5})")
     mesh_traj_train, mesh_traj_test = mesh_traj_data.split_into((train_ratio / 5, (1 - train_ratio) / 5))
     dataset_train = MeshDatasetStatic(mesh_traj_train, 1)
     dataset_test = MeshDatasetStatic(mesh_traj_test, 1)
@@ -240,5 +244,5 @@ if __name__ == "__main__":
         airl.load()
         mesh_traj_onepath = MeshTrajStatic([os.path.join(data_dir, "pp_mesh/onepath/walk_9.csv")], mnw_data)
         dataset_onepath = MeshDatasetStatic(mesh_traj_onepath, 1)
-        airl.show_sample_path(dataset_onepath, 0, save_file=os.path.join(output_dir, "walk_onepath.png"))
+        airl.show_sample_path(dataset_onepath, 0, save_file=os.path.join(output_dir, "walk_9_onepath.png"))
     print("Program ends.")

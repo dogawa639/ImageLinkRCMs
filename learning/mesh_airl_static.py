@@ -692,7 +692,8 @@ class MeshAIRLStatic:
                 compressed = self.model.compress(x, 0)
                 if type(compressed) is tuple:
                     compressed = compressed[0]
-                return self.model(compressed)  # tensor((2d+1)^2, emb_dim)
+                res = self.model(compressed)
+                return res  # tensor((2d+1)^2, emb_dim)
 
         if self.explainers is None:
             backgrounds = self.image_data.load_mesh_images(5, 5, 5)[0].to(self.device)  # tensor((2d+1)^2, c, h, w)
