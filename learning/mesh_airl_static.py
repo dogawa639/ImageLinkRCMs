@@ -6,6 +6,8 @@ from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torch.autograd import detect_anomaly
 
+import shap
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -47,6 +49,8 @@ class MeshAIRLStatic:
 
         self.mnw_data = dataset.mnw_data  # MeshNetwork
         self.output_channel = dataset.output_channel
+
+        self.explainers = None
 
     def train_models(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
                      train_ratio=0.8, d_epoch=5, image_file=None):
@@ -641,6 +645,185 @@ class MeshAIRLStatic:
             plt.tight_layout()
             plt.show()
         return attens
+
+    def show_shap_values(self, img_tensor, show=True, save_file=None):
+        # img_tensor: tensor(bs2, c, h, width) or (c, h, width)
+        self.eval()
+        class Encoder(nn.Module):
+            def __init__(self, model):
+                super().__init__()
+                self.model = model
+
+            def forward(self, x):
+                compressed = self.model.compress(x, 0)
+                if type(compressed) is tuple:
+                    compressed = compressed[0]
+                return self.model(compressed)  # tensor((2d+1)^2, emb_dim)
+
+        img_tensor = img_tensor.to(self.device)
+        if self.explainers is None:
+            backgrounds = self.image_data.load_mesh_images(5, 5, 5)[0].to(self.device)  # tensor((2d+1)^2, c, h, w)
+            self.explainers = [shap.DeepExplainer(Encoder(self.encoders[channel]), backgrounds) for channel in range(self.output_channel)]
+
+        shap_values = [self.explainers[channel].shap_values(img_tensor) for channel in range(self.output_channel)]
+        if show:
+            for channel in range(self.output_channel):
+                sv = shap_values[channel]
+                shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in sv]  # (bs, c, h, w)
+                img_numpy = np.swapaxes(np.swapaxes(img_tensor.clone().detach().cpu().numpy(), 1, -1), 1, 2)
+                shap.image_plot(shap_numpy, -img_numpy, show=False)
+                if save_file is not None:
+                    path = save_file.replace(".png", f"_channel{channel}.png")
+                    plt.savefig(path)
+                plt.show()
+        return shap_values
+
+    def show_sample_path(self, dataset, channel, save_file=None):
+        # dataset: MeshDatasetStatic
+        # channel: int
+        # show: bool
+        # save_file: str (png)
+        class Encoder(nn.Module):
+            def __init__(self, model):
+                super().__init__()
+                self.model = model
+
+            def forward(self, x):
+                compressed = self.model.compress(x, 0)
+                if type(compressed) is tuple:
+                    compressed = compressed[0]
+                return self.model(compressed)  # tensor((2d+1)^2, emb_dim)
+
+        if self.explainers is None:
+            backgrounds = self.image_data.load_mesh_images(5, 5, 5)[0].to(self.device)  # tensor((2d+1)^2, c, h, w)
+            self.explainers = [shap.DeepExplainer(Encoder(self.encoders[tmp_channel]), backgrounds) for tmp_channel in range(self.output_channel)]
+
+        dataset_kwargs = {"batch_size": 1, "shuffle": False, "drop_last": False}
+        dataloader = DataLoader(dataset.get_sub_datasets()[0], **dataset_kwargs)
+
+        path_idxs = []
+        v_values = np.zeros((self.mnw_data.h_dim, self.mnw_data.w_dim), dtype=np.float32)
+        pis = np.zeros((len(dataloader), self.dataset.d * 2 + 1, self.dataset.d * 2 + 1), dtype=np.float32)
+        qs = np.zeros((len(dataloader), self.dataset.d * 2 + 1, self.dataset.d * 2 + 1), dtype=np.float32)
+        exts = np.zeros((len(dataloader), self.dataset.d * 2 + 1, self.dataset.d * 2 + 1), dtype=np.float32)
+        next_states = np.zeros((len(dataloader), self.dataset.d * 2 + 1, self.dataset.d * 2 + 1), dtype=np.float32)
+        self.eval()
+        for i, (state, context, next_state, mask, idx) in enumerate(dataloader):
+            state = state.to(self.device)
+            context = context.to(self.device)
+            next_state = next_state.to(self.device)
+            mask = mask.to(self.device)
+
+            path_idxs.append(idx.clone().detach().cpu().numpy().reshape(-1))
+
+            inputs, inputs_other = self.cat_all_feature(state, context, idx, channel)
+            logits = self.generators[channel](inputs)
+            logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32, device=logits.device))
+            pi = self.get_pi_from_logits(logits)
+
+            # pi of other transportations
+            logits_other = [self.generators[j](inputs_other[j]) for j in range(self.output_channel) if j != channel]
+            logits_other = [torch.where(mask > 0, logits_tmp, tensor(-9e15, dtype=torch.float32,
+                                                                     device=logits_tmp.device)) for logits_tmp in
+                            logits_other]
+            if len(logits_other) > 0:
+                pi_other = torch.cat([self.get_pi_from_logits(logits_tmp).unsqueeze(1) for logits_tmp in logits_other],
+                                     dim=1)  # detached, tensor(bs, output_channel-1, 2d+1, 2d+1)
+            else:
+                pi_other = torch.zeros((state.shape[0], 0, state.shape[2], state.shape[3]), dtype=torch.float32,
+                                       device=state.device)
+            f_val, util, ext, val = self.discriminators[channel].get_vals(inputs, pi_other)
+
+            y_min = max(idx[0, 0].item() - self.dataset.d, 0)
+            y_max = min(idx[0, 0].item() + self.dataset.d + 1, self.mnw_data.h_dim)
+            x_min = max(idx[0, 1].item() - self.dataset.d, 0)
+            x_max = min(idx[0, 1].item() + self.dataset.d + 1, self.mnw_data.w_dim)
+            y_min_local = y_min - (idx[0, 0].item() - self.dataset.d)
+            y_max_local = y_max - (idx[0, 0].item() - self.dataset.d)
+            x_min_local = x_min - (idx[0, 1].item() - self.dataset.d)
+            x_max_local = x_max - (idx[0, 1].item() - self.dataset.d)
+
+            v_values[y_min:y_max, x_min:x_max] = val[0, y_min_local:y_max_local, x_min_local:x_max_local].clone().detach().cpu().numpy()
+            pis[i, :, :] = pi.clone().detach().cpu().numpy()[0, :, :]
+            next_states[i, :, :] = next_state.clone().detach().cpu().numpy()[0, :, :]
+
+            q = util + ext + self.discriminators[channel].gamma * val
+            q = torch.where(mask > 0, q, tensor(0.0, dtype=torch.float32, device=q.device))
+            qs[i, :, :] = q[0, :, :].clone().detach().cpu().numpy()
+            exts[i, :, :] = ext[0, :, :].clone().detach().cpu().numpy()
+
+            img_tensor = self.image_data.load_mesh_image(idx[0, 0].item(), idx[0, 1].item())[0].unsqueeze(0).to(self.device)
+            shap_values = self.explainers[channel].shap_values(img_tensor)
+            shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in shap_values]
+            img_numpy = np.swapaxes(np.swapaxes(img_tensor.clone().detach().cpu().numpy(), 1, -1), 1, 2)
+            shap.image_plot(shap_numpy, -img_numpy, show=False)
+            if save_file is not None:
+                path = save_file.replace(".png", f"_shap_{i}.png")
+                plt.savefig(path)
+                plt.clf()
+                plt.close()
+
+        path_idxs = np.array(path_idxs)
+        pis = np.array(pis)
+        next_states = np.array(next_states)
+
+        plt.figure()
+        # path
+        x = path_idxs[:-1, 1]
+        y = path_idxs[:-1, 0]
+        u = path_idxs[1:, 1] - path_idxs[:-1, 1]
+        v = path_idxs[1:, 0] - path_idxs[:-1, 0]
+        plt.quiver(x, y, u, v, angles='xy', scale_units='xy', scale=1, color="red")
+        # value function
+        plt.imshow(v_values, cmap="viridis")
+        plt.colorbar()
+        plt.tight_layout()
+        if save_file is not None:
+            save_file = save_file.replace(".png", "_value.png")
+            plt.savefig(save_file)
+        plt.clf()
+        plt.close()
+
+        plt.figure(figsize=(5, 2 * len(dataloader)))
+        norm = plt.Normalize(vmin=0, vmax=1)
+        cm = plt.get_cmap("viridis")
+        sm = plt.cm.ScalarMappable(cmap=cm, norm=norm)
+
+        for i in range(len(dataloader)):
+            # pi
+            plt.subplot(len(dataloader), 4, 4 * i + 1)
+            plt.imshow(pis[i], cmap=cm, norm=norm)
+            plt.title(f"pi {i}")
+            plt.xticks([])
+            plt.yticks([])
+            plt.colorbar(mappable=sm, ax=plt.gca())
+            # q
+            plt.subplot(len(dataloader), 4, 4 * i + 2)
+            plt.imshow(qs[i], cmap="viridis")
+            plt.title(f"q {i}")
+            plt.xticks([])
+            plt.yticks([])
+            plt.colorbar()
+            # ext
+            plt.subplot(len(dataloader), 4, 4 * i + 3)
+            plt.imshow(exts[i], cmap="viridis")
+            plt.title(f"ext {i}")
+            plt.xticks([])
+            plt.yticks([])
+            plt.colorbar()
+            # next_state
+            plt.subplot(len(dataloader), 4, 4 * i + 4)
+            plt.imshow(next_states[i], cmap="gray")
+            plt.title(f"next_state {i}")
+            plt.xticks([])
+            plt.yticks([])
+        plt.tight_layout()
+        if save_file is not None:
+            save_file = save_file.replace(".png", "_pi.png")
+            plt.savefig(save_file)
+        plt.clf()
+        plt.close()
+
 
     def train(self):
         for i in range(self.output_channel):

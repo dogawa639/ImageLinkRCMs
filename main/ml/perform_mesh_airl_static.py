@@ -33,6 +33,7 @@ if __name__ == "__main__":
     mask_path = read_geo["mask_path"]
     # data
     read_data = config["DATA"]
+    data_dir = read_data["data_dir"]
     pp_path = json.loads(read_data["pp_path"])
     image_data_path = read_data["image_data_path"]
     onehot_data_path = read_data["onehot_data_path"]
@@ -76,11 +77,15 @@ if __name__ == "__main__":
 
     IMAGE = False
     USESMALL = True
-    ADDOUTPUT = True
-    TRAIN = True
-    TEST = True
+    ADDOUTPUT = False
+    SAVEDATA = True
+    LOADDATA = True
+    TRAIN = False
+    TEST = False
     SHOWATTEN = False
-    target_case = "20240415031836"  # only used when ADDOUTPUT is False
+    SHOWSHAP = False
+    SHOWPATH = True
+    target_case = "20240415100832"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -129,7 +134,7 @@ if __name__ == "__main__":
         mesh_traj_data = MeshTrajStatic(pp_path_small, mnw_data)
     else:
         mesh_traj_data = MeshTrajStatic(pp_path, mnw_data, pp_path_small)  # write down the trimmed data into the pp_path_small
-    print(f"Split dataset into train & val ({train_ratio / 5}) and test ({(1 - train_ratio) / 5})")
+    print(f"Split dataset into train & val ({train_ratio / 10}) and test ({(1 - train_ratio) / 10})")
     mesh_traj_train, mesh_traj_test = mesh_traj_data.split_into((train_ratio / 5, (1 - train_ratio) / 5))
     dataset_train = MeshDatasetStatic(mesh_traj_train, 1)
     dataset_test = MeshDatasetStatic(mesh_traj_test, 1)
@@ -139,6 +144,12 @@ if __name__ == "__main__":
     params = dataset_train.get_normalization_params()
     dataset_train.normalize(*params)
     dataset_test.normalize(*params)
+    if SAVEDATA:
+        save_class_val(dataset_train, os.path.join(data_dir, "pp_mesh/dataset_train.pkl"))
+        save_class_val(dataset_test, os.path.join(data_dir, "pp_mesh/dataset_test.pkl"))
+    if LOADDATA:
+        dataset_train = load_class_val(dataset_train, os.path.join(data_dir, "pp_mesh/dataset_train.pkl"))
+        dataset_test = load_class_val(dataset_test, os.path.join(data_dir, "pp_mesh/dataset_test.pkl"))
 
     # load satellite image data
     print("Load MeshImageData object")
@@ -214,4 +225,20 @@ if __name__ == "__main__":
                 plt.savefig(os.path.join(output_dir, "atten", f"{row}_{col}.png"))
                 plt.clf()
                 plt.close()
+    if SHOWSHAP:
+        airl.load()
+        if not os.path.exists(os.path.join(output_dir, "shap")):
+            os.mkdir(os.path.join(output_dir, "shap"))
+        for row in range(h_dim):
+            for col in range(w_dim):
+                path = os.path.join(output_dir, "shap", f"{row}_{col}.png")
+                image_tensor = image_data.load_mesh_image(row, col)[0].unsqueeze(0)  # tensor(1, c, h, w)
+                shap_values = airl.show_shap_values(image_tensor, show=False, save_file=path)
+                plt.clf()
+                plt.close()
+    if SHOWPATH:
+        airl.load()
+        mesh_traj_onepath = MeshTrajStatic([os.path.join(data_dir, "pp_mesh/onepath/walk_9.csv")], mnw_data)
+        dataset_onepath = MeshDatasetStatic(mesh_traj_onepath, 1)
+        airl.show_sample_path(dataset_onepath, 0, save_file=os.path.join(output_dir, "walk_onepath.png"))
     print("Program ends.")

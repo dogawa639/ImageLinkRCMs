@@ -114,11 +114,11 @@ class MeshNetwork:
             if not contained:
                 return None
             x_idx = int((points[0] - self.coords[0]) / self.x_size)
-            y_idx = self.h_dim - int((points[1] - self.coords[1]) / self.y_size)
+            y_idx = self.h_dim - int((points[1] - self.coords[1]) / self.y_size) - 1
             return (y_idx, x_idx)
         else:
             x_idx = ((points[:, 0] - self.coords[0]) / self.x_size).astype(int)
-            y_idx = (self.h_dim - (points[:, 1] - self.coords[1]) / self.y_size).astype(int)
+            y_idx = (self.h_dim - (points[:, 1] - self.coords[1]) / self.y_size - 1).astype(int)
             return np.array([[y_idx[i], x_idx[i]] if contained[i] else None for i in
                     range(len(points))])  # (num_points, 2)
 
@@ -129,11 +129,11 @@ class MeshNetwork:
             if not contained:
                 return None
             x_idx = int((points[0] - self.coords[0]) / self.x_size)
-            y_idx = self.h_dim - int((points[1] - self.coords[1]) / self.y_size)
+            y_idx = self.h_dim - int((points[1] - self.coords[1]) / self.y_size) - 1
             return self.cells[y_idx][x_idx]
         else:
             x_idx = ((points[:, 0] - self.coords[0]) / self.x_size).astype(int)
-            y_idx = (self.h_dim - (points[:, 1] - self.coords[1]) / self.y_size).astype(int)
+            y_idx = (self.h_dim - (points[:, 1] - self.coords[1]) / self.y_size - 1).astype(int)
             return [self.cells[y_idx[i]][x_idx[i]] if contained[i] else None for i in range(len(points))]  # (num_points)
 
     def distance_from(self, points):
