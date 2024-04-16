@@ -80,16 +80,12 @@ if __name__ == "__main__":
     ADDOUTPUT = False
     SAVEDATA = False
     LOADDATA = True
-    TRAIN = True
+    TRAIN = False
     TEST = False
     SHOWATTEN = False
     SHOWSHAP = False
     SHOWPATH = True
-<<<<<<< Updated upstream
-    target_case = "20240415145450"  # only used when ADDOUTPUT is False
-=======
-    target_case = "20240415132502"  # only used when ADDOUTPUT is False
->>>>>>> Stashed changes
+    target_case = "image-norm-cnn"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -240,9 +236,15 @@ if __name__ == "__main__":
                 shap_values = airl.show_shap_values(image_tensor, show=False, save_file=path)
                 plt.clf()
                 plt.close()
+                break
+            break
     if SHOWPATH:
         airl.load()
-        mesh_traj_onepath = MeshTrajStatic([os.path.join(data_dir, "pp_mesh/onepath/walk_9.csv")], mnw_data)
-        dataset_onepath = MeshDatasetStatic(mesh_traj_onepath, 1)
-        airl.show_sample_path(dataset_onepath, 0, save_file=os.path.join(output_dir, "walk_9_onepath.png"))
+        file_list = [["walk_9", "walk_19", "walk_53"], ["car_35", "car_72", "car_85"]]
+        for channel in range(len(file_list)):
+            for name in file_list[channel]:
+                file = f"pp_mesh/onepath/{name}.csv"
+                mesh_traj_onepath = MeshTrajStatic([os.path.join(data_dir, file)], mnw_data)
+                dataset_onepath = MeshDatasetStatic(mesh_traj_onepath, 1)
+                airl.show_sample_path(dataset_onepath, channel, save_file=os.path.join(output_dir, f"{name}_onepath.png"))
     print("Program ends.")

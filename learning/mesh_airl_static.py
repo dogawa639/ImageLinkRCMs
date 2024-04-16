@@ -648,22 +648,12 @@ class MeshAIRLStatic:
 
     def show_shap_values(self, img_tensor, show=True, save_file=None):
         # img_tensor: tensor(bs2, c, h, width) or (c, h, width)
-        self.eval()
-        class Encoder(nn.Module):
-            def __init__(self, model):
-                super().__init__()
-                self.model = model
-
-            def forward(self, x):
-                compressed = self.model.compress(x, 0)
-                if type(compressed) is tuple:
-                    compressed = compressed[0]
-                return self.model(compressed)  # tensor((2d+1)^2, emb_dim)
+        #self.eval()
 
         img_tensor = img_tensor.to(self.device)
         if self.explainers is None:
             backgrounds = self.image_data.load_mesh_images(5, 5, 5)[0].to(self.device)  # tensor((2d+1)^2, c, h, w)
-            self.explainers = [shap.DeepExplainer(Encoder(self.encoders[channel]), backgrounds) for channel in range(self.output_channel)]
+            self.explainers = [shap.DeepExplainer(_Encoder(self.encoders[channel]), backgrounds) for channel in range(self.output_channel)]
 
         shap_values = [self.explainers[channel].shap_values(img_tensor) for channel in range(self.output_channel)]
         if show:
@@ -683,21 +673,11 @@ class MeshAIRLStatic:
         # channel: int
         # show: bool
         # save_file: str (png)
-        class Encoder(nn.Module):
-            def __init__(self, model):
-                super().__init__()
-                self.model = model
 
-            def forward(self, x):
-                compressed = self.model.compress(x, 0)
-                if type(compressed) is tuple:
-                    compressed = compressed[0]
-                res = self.model(compressed)
-                return res  # tensor((2d+1)^2, emb_dim)
-
-        if self.explainers is None:
-            backgrounds = self.image_data.load_mesh_images(5, 5, 5)[0].to(self.device)  # tensor((2d+1)^2, c, h, w)
-            self.explainers = [shap.DeepExplainer(Encoder(self.encoders[tmp_channel]), backgrounds) for tmp_channel in range(self.output_channel)]
+        self.eval()
+        backgrounds = self.image_data.load_mesh_images(5, 5, 5)[0].to(self.device)  # tensor((2d+1)^2, c, h, w)
+        encoder = _Encoder(self.encoders[channel])
+        explainer = shap.DeepExplainer(encoder, backgrounds)
 
         dataset_kwargs = {"batch_size": 1, "shuffle": False, "drop_last": False}
         dataloader = DataLoader(dataset.get_sub_datasets()[0], **dataset_kwargs)
@@ -708,7 +688,6 @@ class MeshAIRLStatic:
         qs = np.zeros((len(dataloader), self.dataset.d * 2 + 1, self.dataset.d * 2 + 1), dtype=np.float32)
         exts = np.zeros((len(dataloader), self.dataset.d * 2 + 1, self.dataset.d * 2 + 1), dtype=np.float32)
         next_states = np.zeros((len(dataloader), self.dataset.d * 2 + 1, self.dataset.d * 2 + 1), dtype=np.float32)
-        self.eval()
         for i, (state, context, next_state, mask, idx) in enumerate(dataloader):
             state = state.to(self.device)
             context = context.to(self.device)
@@ -754,7 +733,9 @@ class MeshAIRLStatic:
             exts[i, :, :] = ext[0, :, :].clone().detach().cpu().numpy()
 
             img_tensor = self.image_data.load_mesh_image(idx[0, 0].item(), idx[0, 1].item())[0].unsqueeze(0).to(self.device)
-            shap_values = self.explainers[channel].shap_values(img_tensor)
+            shap_values = explainer.shap_values(img_tensor)
+            if len(shap_values.shape) == 4:
+                shap_values = np.expand_dims(shap_values, 0)
             shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in shap_values]
             img_numpy = np.swapaxes(np.swapaxes(img_tensor.clone().detach().cpu().numpy(), 1, -1), 1, 2)
             shap.image_plot(shap_numpy, -img_numpy, show=False)
@@ -860,3 +841,17 @@ class MeshAIRLStatic:
         traj_idx = self.dataset.mesh_traj_data.get_traj_idx_one_agent(channel, aid)
         self.mnw_data.show_path(traj_idx)
 
+class _Encoder(nn.Module):
+    # for shap calculation
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, x):
+        compressed = self.model.compress(x, 0)
+        if type(compressed) is tuple:
+            compressed = compressed[0]
+        #return self.model(compressed).sum(dim=-1).view(-1, 1)  # tensor((2d+1)^2, emb_dim)
+        res = self.model(compressed)
+        res = res.sum(dim=-1).view(-1, 1)
+        return res  # tensor((2d+1)^2, emb_dim)

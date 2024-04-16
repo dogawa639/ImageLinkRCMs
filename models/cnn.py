@@ -111,24 +111,25 @@ class CNN1x1(nn.Module):
 class BaseConv(nn.Module):
     def __init__(self, in_channels, out_channels, sn=False, dropout=0.0):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, in_channels, 3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
         if sn:
             self.conv1 = spectral_norm(self.conv1)
             self.conv2 = spectral_norm(self.conv2)
-        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.bn1 = nn.BatchNorm2d(in_channels)
         self.bn2 = nn.BatchNorm2d(out_channels)
-        self.act_fn = nn.ReLU(inplace=True)
+        self.act_fn1 = nn.ReLU()
+        self.act_fn2 = nn.ReLU()
         self.dropout = nn.Dropout2d(dropout)
 
         self.sequence = nn.Sequential(
                 self.conv1,
                 self.bn1,
-                self.act_fn,
+                self.act_fn1,
                 self.dropout,
                 self.conv2,
                 self.bn2,
-                self.act_fn
+                self.act_fn2
         )
 
     def forward(self, x):

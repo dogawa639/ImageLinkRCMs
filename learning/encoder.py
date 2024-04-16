@@ -26,7 +26,7 @@ class CNNEnc(nn.Module):
         self.w_dim = w_dim
         self.mid_dim = mid_dim
 
-        self.resnet50 = nn.ModuleList([ResNet(3, num_classes=mid_dim) for _ in range(num_source)])
+        self.resnet50 = nn.ModuleList([ResNet(3, depth=3, num_classes=mid_dim) for _ in range(num_source)])
 
         self.lin = nn.ModuleList([FF(self.mid_dim, emb_dim, self.mid_dim*2, bias=True) for _ in range(num_source)])
         self.norm0 = nn.LayerNorm(patch_size)
@@ -63,7 +63,7 @@ class CNNEnc(nn.Module):
             x = x.squeeze(0)
         return x
 
-    def compress(self, patch, num_source=1):
+    def compress(self, patch, num_source=0):
         # satellite: (bs2, c, h, width) or (c, h, width)
         if patch.dim() == 3:
             patch = patch.unsqueeze(0)  # (1, c, h, w)
