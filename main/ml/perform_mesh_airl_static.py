@@ -77,7 +77,7 @@ if __name__ == "__main__":
 
     IMAGE = False
     USESMALL = True
-    ADDOUTPUT = False
+    ADDOUTPUT = True
     SAVEDATA = False
     LOADDATA = True
     TRAIN = True
