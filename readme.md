@@ -23,8 +23,6 @@ conda activate new_env
 4. Change the paths in the config files to the correct paths on your machine
 5. Run the main python files in the `main` folder
 
-"PatchDataset", "XImageDataset", "XYImageDataset", "XHImageDataset", "StreetViewDataset", "StreetViewXDataset", "ImageDataset"
-
 ## Structure
 ```mermaid
 graph LR
