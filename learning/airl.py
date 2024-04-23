@@ -62,7 +62,7 @@ class AIRL:
     
     def train_models(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
               ratio=(0.8, 0.2), max_train_num=10000, d_epoch=5, lr_f0=0.01, lr_e=0.0, image_file=None):
-        log = Logger(os.path.join(self.model_dir, "log.json"), conf_file, figsize=(6.4, 4.8 * 3))  #loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,accuracy,ll,criteria
+        log = Logger(os.path.join(self.model_dir, "log.json"), conf_file, fig_file=os.path.join(self.model_dir, "log.png"), figsize=(6.4, 4.8 * 3))  #loss_e,loss_g,loss_d,loss_e_val,loss_g_val,loss_d_val,accuracy,ll,criteria
 
         optimizer_g = optim.Adam(self.generator.parameters(), lr=lr_g)
         optimizer_d = optim.Adam(self.discriminator.parameters(), lr=lr_d)

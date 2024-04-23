@@ -1,6 +1,7 @@
 if __name__ == "__main__":
     import configparser
     import json
+    import datetime
     import os
     from learning.generator import *
     from learning.discriminator import *
@@ -68,10 +69,26 @@ if __name__ == "__main__":
     model_dir = read_save["model_dir"]
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
+    output_dir = read_save["output_dir"]
 
+    ADDOUTPUT = True
     TRAIN = True
     TEST = False
     SHAP = False
+
+    target_case = "20240415145450"  # only used when ADDOUTPUT is False
+
+    # add datetime to output_dir
+    if ADDOUTPUT:
+        date_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        print(f"date_str: {date_str}")
+        output_dir = os.path.join(output_dir, date_str)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        else:
+            raise Exception("Output directory already exists.")
+    else:
+        output_dir = os.path.join(output_dir, target_case)
 
     # instance creation
     use_index = (model_type == "cnn")
@@ -129,7 +146,7 @@ if __name__ == "__main__":
     # set emb_dim_enc = 0, enc_dim_dis = 0 if not using encoder
     ratio = (0.8, 0.2)
 
-    airl = AIRL(generator, discriminator, use_index, datasets, model_dir, image_data=image_data, encoder=encoder, h_dim=h_dim, f0=f0,
+    airl = AIRL(generator, discriminator, use_index, datasets, output_dir, image_data=image_data, encoder=encoder, h_dim=h_dim, f0=f0,
                  hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, use_compressed_image=use_compressed_image, device=device)
 
     if TRAIN:
