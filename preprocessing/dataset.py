@@ -599,11 +599,12 @@ class PatchDataset(Dataset):
 
 
 class ImageDatasetBase(Dataset):
-    def __init__(self, crop=True, affine=True, transform_coincide=True, flip=True):
+    def __init__(self, crop=True, affine=True, transform_coincide=True, flip=True, use_pt=False):
         self.crop = crop
         self.affine = affine
         self.transform_coincide = transform_coincide
         self.flip = flip
+        self.use_pt = use_pt
 
         self.preprocess = transforms.Compose([
                 transforms.PILToTensor(),
@@ -629,6 +630,8 @@ class ImageDatasetBase(Dataset):
             ]
         self.ra = transforms.RandomAffine  #(*self.ra_params[0:-1])
 
+        self.data = dict()  # key: path, value: img_tensor
+
     def __len__(self):
         raise NotImplementedError
 
@@ -637,13 +640,21 @@ class ImageDatasetBase(Dataset):
 
     def load_image(self, path):
         # path: str, png
-        path_cache = path.replace(".png", ".pt")
-        if os.path.exists(path_cache):
-            img = torch.load(path_cache)
+        if self.use_pt:
+            path_cache = path.replace(".png", ".pt")
+            if os.path.exists(path_cache):
+                img = torch.load(path_cache)
+            else:
+                img = Image.open(path)
+                img = self.preprocess(img)
+                torch.save(img, path_cache)
         else:
-            img = Image.open(path)
-            img = self.preprocess(img)
-            torch.save(img, path_cache)
+            if path in self.data:
+                img = self.data[path]
+            else:
+                img = Image.open(path)
+                img = self.preprocess(img)
+                self.data[path] = img
         return img
 
     def transform_by_params(self, img_tensor, ra_params, rc_params, h_flip, v_flip):
