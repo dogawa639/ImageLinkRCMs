@@ -103,24 +103,15 @@ class LinkImageData:
         # idx: int
         # img: npy
         # return list of imgs(None or tensor)
-        imgs = []
-        shape = None
-        for data in self.data_list:
+        res = None
+        for i, data in enumerate(self.data_list):
             if "data_dir" in data:
                 path = os.path.join(data["data_dir"], f"{self.lids[idx]}.png")
                 if os.path.exists(path):
                     image = self.image_dataset_base.load_image(path)  # (c, h, w)
-                    imgs.append(image)
-                    shape = image.shape
-                else:
-                    imgs.append(None)
-        if shape is None:
-            res = None
-        else:
-            res = torch.zeros((len(imgs), *shape), dtype=torch.float32, requires_grad=False)
-            for i, img in enumerate(imgs):
-                if img is not None:
-                    res[i] = img
+                    if res is None:
+                        res = torch.zeros((len(self.data_list), *image.shape), dtype=torch.float32, requires_grad=False)
+                    res[i] = image
         return res
 
     def load_compressed(self, idx):

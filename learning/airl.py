@@ -620,14 +620,11 @@ class AIRL:
                     tmp_feature = compressed
                 else:
                     tmp_feature = tmp_feature + compressed  # (emb_dim)
-            if tmp_feature is not None:  # if there are at least one image for link i (idx)
-                comp_dim = tmp_feature.shape[-1]
-                if comp_feature is None:  # if it is the first link that has at least one image
-                    comp_feature = torch.zeros((i, comp_dim), dtype=torch.float32, device=self.device)
-            elif comp_dim is not None:  # if there are no image for link i (idx) and comp_dim is already set
-                tmp_feature = torch.zeros((1, comp_dim), dtype=torch.float32, device=self.device)
             if tmp_feature is not None:
-                comp_feature = torch.cat((comp_feature, tmp_feature), dim=0)
+                if comp_feature is None:  # initialize comp_feature
+                    comp_dim = tmp_feature.shape[-1]
+                    comp_feature = torch.zeros((len(self.image_data.lids), comp_dim), dtype=torch.float32, device=self.device)
+                comp_feature[i, :] = tmp_feature
         if comp_feature is None:
             print("No image feature is loaded.")
         else:
