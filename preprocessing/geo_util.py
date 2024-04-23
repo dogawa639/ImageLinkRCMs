@@ -43,7 +43,7 @@ class MapSegmentation:
     def __init__(self, files, max_class_num=10):
         self.files = files
         self.max_class_num = max_class_num  # containing other class
-        self._load_color_dict() # self.color_dict, self.pixel_count  key: color_id
+        self._load_color_dict()  # self.color_dict, self.pixel_count  key: color_id
         self._sort_color()  # self.color_list  sorted bu color pixel count, [0]: majour class
         self.class_num = len(self.color_dict) + 1  # 1: other (class_num = 0)
 

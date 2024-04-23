@@ -463,7 +463,6 @@ class AIRL:
     #        f_val = self.discriminator(inputs, pi, i=i)
     #        return f_val
 
-
     def get_criteria(self, batch, pi, i, w=None):
         # ll, TP, FP, FN, TN
         if self.use_index:
@@ -504,7 +503,7 @@ class AIRL:
     def cat_image_feature(self, batch, w=None):
         # w: (bs, w_dim)
         # index: (bs, 9)
-        if self.use_compressed_image: # 2 step compression
+        if self.use_compressed_image:  # 2 step compression
             image_feature = self.encoder(self.comp_feature, w=w)  # (bs, link_num, mid_dim) -> (bs, link_num, emb_dim)
         else:  # single step compression
             idx_set = None

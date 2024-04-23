@@ -93,7 +93,7 @@ class LinkImageData:
                 path = os.path.join(data["data_dir"], f"{self.lids[idx]}.png")
                 image = None
                 if os.path.exists(path):
-                    image = self.image_dataset_base.preprocess(Image.open(path))
+                    image = self.image_dataset_base.load_image(path)
                 images.append(image)
             else:
                 print(f"No data dir is set for {data}.")
@@ -109,7 +109,7 @@ class LinkImageData:
             if "data_dir" in data:
                 path = os.path.join(data["data_dir"], f"{self.lids[idx]}.png")
                 if os.path.exists(path):
-                    image = self.image_dataset_base.preprocess(Image.open(path))  # (c, h, w)
+                    image = self.image_dataset_base.load_image(path)  # (c, h, w)
                     imgs.append(image)
                     shape = image.shape
                 else:
@@ -149,7 +149,7 @@ class LinkImageData:
                     path = os.path.join(tmp_dir, f"{lid}.png")
                     if os.path.exists(path):
                         encoder.eval()
-                        image = self.image_dataset_base.preprocess(Image.open(path))
+                        image = self.image_dataset_base.load_image(path)
                         image = image.unsqueeze(0).to(device)
                         compressed = encoder(image).detach().cpu().numpy().flatten()
                         np.save(os.path.join(tmp_dir, f"{lid}.npy"), compressed)

@@ -13,7 +13,7 @@ if __name__ == "__main__":
     from preprocessing.dataset import *
     from learning.airl import *
 
-    CONFIG = "../../config/config_airl_test.ini"
+    CONFIG = "../../config/config_airl_cnn.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
     # general
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    TRAIN =True
+    TRAIN = True
     TEST = False
     SHAP = False
 

@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import geopandas as gpd
 import shapely
 import osmnx as ox
 
@@ -605,6 +606,105 @@ class NetworkBase:
             edge_prop.columns = ["LinkID"] + cols
 
             edge_prop.to_csv(link_prop_path, index=False)
+
+    @staticmethod
+    def simplify_link(link_path, utm_num, out_link_path=None, thresh=10):
+        # link_path: path to the link data
+        epsg = 2442 + utm_num
+        link = gpd.read_file(link_path)
+        link = link.set_crs(epsg=4326)
+        link = link.to_crs(epsg=epsg)
+        # set node id
+        node_coords = np.unique(np.concatenate((link["geometry"].apply(lambda x: x.coords[0]).values, link["geometry"].apply(lambda x: x.coords[1]).values), axis=0))
+        node_coord2id = {coord: i+1 for i, coord in enumerate(node_coords)}  # key: coord, value: node id
+        # merge nodes if the distance is less than thresh
+        node_dists = np.full((len(node_coords), len(node_coords)), thresh + 1, dtype=float)
+        min_idxs = np.full((len(node_coords)), -1, dtype=int)  # closest node index
+        min_dists = np.full((len(node_coords)), thresh + 1, dtype=float)  # closest node distance
+        for i, coord1 in enumerate(node_coords):
+            for j, coord2 in enumerate(node_coords):
+                if i == j:
+                    continue
+                node_dists[i, j] = np.sqrt((coord1[0] - coord2[0]) ** 2 + (coord1[1] - coord2[1]) ** 2)
+            min_idxs[i] = np.argmin(node_dists[i])
+            min_dists[i] = np.min(node_dists[i])
+        # re-allocate new node id
+        tmp_id = 1
+        node_coords_new = []
+        for i, coord in enumerate(node_coords):
+            if min_idxs[min_idxs[i]] == i and min_dists[i] < thresh:
+                if min_idxs[i] < i:
+                    continue
+                coord2 = node_coords[min_idxs[i]]
+                node_coord2id[coord] = tmp_id
+                node_coord2id[coord2] = tmp_id
+                tmp_id += 1
+                node_coords_new.append((np.array(coord) + np.array(coord2)) * 0.5)
+            else:
+                node_coord2id[coord] = tmp_id
+                tmp_id += 1
+                node_coords_new.append(coord)
+
+        # replace old coords with new coords
+        node_ids_start = link["geometry"].apply(lambda x: node_coord2id[x.coords[0]]).values
+        node_ids_end = link["geometry"].apply(lambda x: node_coord2id[x.coords[1]]).values
+        node_coords_start = np.array([node_coords_new[node_id-1] for node_id in node_ids_start])
+        node_coords_end = np.array([node_coords_new[node_id-1] for node_id in node_ids_end])
+
+        link["start"] = node_ids_start
+        link["end"] = node_ids_end
+        link["geometry"] = [shapely.geometry.LineString([coord_start, coord_end]) for coord_start, coord_end in zip(node_coords_start, node_coords_end)]
+        link = link.to_crs(epsg=4326)
+        link["start_lon"] = link["geometry"].apply(lambda x: x.coords[0][0])
+        link["start_lat"] = link["geometry"].apply(lambda x: x.coords[0][1])
+        link["end_lon"] = link["geometry"].apply(lambda x: x.coords[1][0])
+        link["end_lat"] = link["geometry"].apply(lambda x: x.coords[1][1])
+
+        # drop zero length link
+        link = link[(link["geometry"].apply(lambda x: x.length) > 0)]
+
+        # drop duplicated links
+        # car, ped : or
+        # lanes, ped_width: max
+        duplicated = link[["start", "end"]].duplicated(keep="first")
+        for idx in link.index:
+            if not duplicated[idx]:
+                target = link[((link["start"] == link.loc[idx, "start"]) & (link["end"] == link.loc[idx, "end"]))]
+                if len(target) > 1:
+                    for col in ["car", "ped"]:
+                        link.loc[idx, col] = "TRUE" if target[col].any() else "FALSE"
+                    for col in ["lanes", "ped_width"]:
+                        link.loc[idx, col] = target[col].max()
+        link = link[~duplicated]
+
+        if out_link_path is not None:
+            link.to_file(out_link_path, driver="GeoJSON")
+        return link
+
+    @staticmethod
+    def get_network_from_link(link_path, utm_num, out_link_path=None, out_node_path=None):
+        # link_path: path to the link data
+        epsg = 2442 + utm_num
+        link = gpd.read_file(link_path)
+        # set node data
+        node_coords = np.concatenate((link["geometry"].apply(lambda x: x.coords[0]).values, link["geometry"].apply(lambda x: x.coords[1]).values), axis=0)
+        node_ids = np.concatenate((link["start"].values, link["end"].values), axis=0)
+        node_dict = {}
+        for i in range(len(node_coords)):
+            node_dict[node_ids[i]] = (node_coords[i][0], node_coords[i][1])
+        node = pd.DataFrame({"id": list(node_dict.keys()), "lon": [coord[0] for coord in node_dict.values()], "lat": [coord[1] for coord in node_dict.values()]})
+        node["id"] = node["id"].astype(int)
+        node.sort_values("id", inplace=True)
+
+        # set link data
+        link = pd.DataFrame(link).drop("geometry", axis=1)
+        link[["id", "start", "end"]] = link[["id", "start", "end"]].astype(int)
+        # write dataframe to csv
+        if out_link_path is not None:
+            link.to_csv(out_link_path, index=False)
+        if out_node_path is not None:
+            node.to_csv(out_node_path, index=False)
+        return node, link
 
     @property
     def feature_num(self):

@@ -118,14 +118,13 @@ class GridDataset(Dataset):
             link_idxs[i, :] = [self.nw_data.lid2idx[np.random.choice(edges)] if len(edges) > 0 else -1 for edges in action_edge]
         return tensor(inputs, requires_grad=False), tensor(masks, requires_grad=False), tensor(link_idxs, requires_grad=False)
 
-
     def get_fake_batch(self, real_batch, g_output):
         mask = real_batch[1].view(-1, 3, 3)
         logits = torch.where(mask > 0, g_output, tensor(-9e15, dtype=torch.float32, device=g_output.device))
         next_link_prob = F.softmax(logits, dim=-1)
         next_links = torch.multinomial(next_link_prob.view(-1, g_output.shape[-1]), num_samples=1).squeeze()
         next_links_one_hot = F.one_hot(next_links, num_classes=g_output.shape[-1]).view(g_output.shape)
-        return [real_batch[i] if i != 2 else next_links_one_hot for i in range(len(real_batch))]
+        return [real_batch[i] if i != 2 else next_links_one_hot for i in range(len(real_batch))]  # replace next_link with fake next_link
 
 
 class PPEmbedDataset(Dataset):
@@ -635,6 +634,17 @@ class ImageDatasetBase(Dataset):
 
     def __getitem__(self, item):
         raise NotImplementedError
+
+    def load_image(self, path):
+        # path: str, png
+        path_cache = path.replace(".png", ".pt")
+        if os.path.exists(path_cache):
+            img = torch.load(path_cache)
+        else:
+            img = Image.open(path)
+            img = self.preprocess(img)
+            torch.save(img, path_cache)
+        return img
 
     def transform_by_params(self, img_tensor, ra_params, rc_params, h_flip, v_flip):
         # mask: mask for transformed

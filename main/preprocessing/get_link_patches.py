@@ -8,7 +8,7 @@ if __name__ == "__main__":
     from models.deeplabv3 import resnet50, ResNet50_Weights
     from utility import *
 
-    CONFIG = "../../config/config_airl_all.ini"
+    CONFIG = "../../config/config_airl_cnn.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
 
@@ -27,10 +27,10 @@ if __name__ == "__main__":
     read_feature = config["FEATURE"]
     max_class_num = int(read_feature["max_class_num"])
 
-    SATELLITE = False
-    ONEHOT = False
-    LINKPROP = False
-    COMPRESS = True
+    SATELLITE = True
+    ONEHOT = True
+    LINKPROP = True
+    COMPRESS = False
     nw_data = NetworkCNN(node_path, link_path)
 
     if SATELLITE:
@@ -44,6 +44,7 @@ if __name__ == "__main__":
         image_data.set_voronoi(nw_data)
         image_data.set_datafolder(onehot_data_dir, patch_size=128)
         if LINKPROP:  # overwrite link_prop model with one-hot model
+            link_prop_path = link_prop_path.replace(".csv", "_onehot.csv")
             print(f"Write link prop in {link_prop_path}.")
             image_data.write_link_prop(onehot_data_dir, link_prop_path)
 
