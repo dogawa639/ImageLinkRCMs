@@ -648,7 +648,9 @@ class MeshAIRLStatic:
 
     def show_shap_values(self, img_tensor, show=True, save_file=None):
         # img_tensor: tensor(bs2, c, h, width) or (c, h, width)
-        #self.eval()
+        self.eval()
+        for channel in range(self.output_channel):
+            self.encoders[channel].train()
 
         img_tensor = img_tensor.to(self.device)
         if self.explainers is None:
@@ -659,9 +661,10 @@ class MeshAIRLStatic:
         if show:
             for channel in range(self.output_channel):
                 sv = shap_values[channel]
+                sv = [s if len(s.shape) == 4 else np.expand_dims(s, 0) for s in sv]  # [(bs, c, w, h)]
                 shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in sv]  # (bs, c, h, w)
                 img_numpy = np.swapaxes(np.swapaxes(img_tensor.clone().detach().cpu().numpy(), 1, -1), 1, 2)
-                shap.image_plot(shap_numpy, -img_numpy, show=False)
+                shap.image_plot(shap_numpy, (img_numpy * np.array([44.63, 45.54, 45.94]).reshape(1, 1, 1, -1) + np.array([110.96, 110.76, 102.67]).reshape(1, 1, 1, -1)).astype(np.uint8), show=False)
                 if save_file is not None:
                     path = save_file.replace(".png", f"_channel{channel}.png")
                     plt.savefig(path)

@@ -59,6 +59,8 @@ class AIRL:
                 self._load_image_feature()  # self.comp_feature: (link_num, comp_dim)
         if self.use_w:
             self.f0 = self.f0.to(device)
+
+        self.explainer = None
     
     def train_models(self, conf_file, epochs, batch_size, lr_g, lr_d, shuffle,
               ratio=(0.8, 0.2), max_train_num=10000, d_epoch=5, lr_f0=0.01, lr_e=0.0, image_file=None):
@@ -335,6 +337,8 @@ class AIRL:
                     inputs = batch_real[0]
                 else:
                     inputs = torch.cat([inputs, batch_real[0]], dim=0)
+                if inputs.shape[0] >= 2 * sample_num:
+                    break
             break
 
         inputs_test = inputs[sample_num:2 * sample_num, ...]
@@ -396,7 +400,6 @@ class AIRL:
         fig = plt.figure(figsize=(5, 5 * len(idxs)))
         for i in idxs:
             images = self.image_data.load_link_image(i)  # list(tensor(n, c, h, w))
-            tmp_feature = None
             len_imgs = max(len_imgs, len(images))
             for num_source, img in enumerate(images):
                 img = img.to(self.device)
@@ -413,6 +416,44 @@ class AIRL:
                 ax.imshow(atten, interpolation='bilinear')
         plt.show()
         print("show_attention_map end.")
+
+    def show_encoder_shap(self, idxs, show=True, save_file=None):
+        # img_tensor: tensor(bs2, c, h, width) or (c, h, width)
+        self.eval()
+        self.encoder.train()
+        fig = plt.figure(figsize=(5, 5 * len(idxs)))
+        for i in idxs:
+            images = self.image_data.load_link_image(i)  # [tensor(n, c, h, w)]
+            if images is None:
+                print(f"Image for link idx {i} does not exist.")
+                continue
+            # only use first source
+            img_tensor = images[0].to(self.device)
+
+            if self.explainer is None:
+                cnt = 0
+                backgrounds = []
+                while len(backgrounds) < 5 and cnt < 100:
+                    if cnt not in idxs:
+                        tmp = self.image_data.load_link_image(cnt)
+                        if tmp is not None:
+                            backgrounds.append(tmp[0])
+                    cnt += 1
+                backgrounds = torch.cat(backgrounds, dim=0).to(self.device)
+                self.explainer = shap.DeepExplainer(_Encoder(self.encoder, 0), backgrounds)
+
+            shap_values = self.explainer.shap_values(img_tensor)  # [(bs, c, w, h)] or [(c, w, h)]
+            shap_values = [sv if len(sv.shape) == 4 else np.expand_dims(sv, 0) for sv in shap_values]  # [(bs, c, w, h)]
+            if show:
+                shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in shap_values]  # [(bs, w, h, c)]
+                img_numpy = np.swapaxes(np.swapaxes(img_tensor.clone().detach().cpu().numpy(), 1, -1), 1, 2)  # (n, w, h, c)
+                shap.image_plot(shap_numpy, (img_numpy * np.array([44.63, 45.54, 45.94]).reshape(1, 1, 1, -1) + np.array([110.96, 110.76, 102.67]).reshape(1, 1, 1, -1)).astype(np.uint8), show=False)
+                if save_file is not None:
+                    path = save_file.replace(".png", f"_{i}.png")
+                    plt.savefig(path)
+                else:
+                    plt.show()
+        return shap_values
 
     def loss(self, log_d_g, log_d_d, hinge_loss=False):
         # log_d_g, log_d_d: (log d_for_g, log 1-d_for_g), (log d_for_d, log 1-d_for_d)
@@ -631,3 +672,19 @@ class AIRL:
         else:
             self.comp_feature = comp_feature  # (link_num, comp_dim)  comp_dim: mid_dim
 
+
+class _Encoder(nn.Module):
+    # for shap calculation
+    def __init__(self, model, num_source=0):
+        super().__init__()
+        self.model = model
+        self.num_source = num_source
+
+    def forward(self, x):
+        compressed = self.model.compress(x, self.num_source)
+        if type(compressed) is tuple:
+            compressed = compressed[0]
+        #return self.model(compressed).sum(dim=-1).view(-1, 1)  # tensor((2d+1)^2, emb_dim)
+        res = self.model(compressed)
+        res = res.sum(dim=-1).view(-1, 1)
+        return res  # tensor(bs, 1)

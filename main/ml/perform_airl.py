@@ -157,4 +157,6 @@ if __name__ == "__main__":
         #airl.show_attention_map([0])
     if SHAP:
         airl.load()
-        airl.get_shap(datasets_test, 0)
+        #airl.get_shap(datasets_test, 0)
+        link_idxs = [0]
+        airl.show_encoder_shap(link_idxs, show=True, save_file=os.path.join(output_dir, f"shap.png"))
