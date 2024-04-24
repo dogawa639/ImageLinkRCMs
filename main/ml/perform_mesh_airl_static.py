@@ -4,9 +4,11 @@ if __name__ == "__main__":
     import datetime
     import os
 
+    import numpy as np
     import geopandas as gpd
     import pandas as pd
     import matplotlib.pyplot as plt
+    from PIL import Image
 
     from learning.generator import *
     from learning.discriminator import *
@@ -77,16 +79,16 @@ if __name__ == "__main__":
 
     IMAGE = False
     USESMALL = True
-    ADDOUTPUT = True
+    ADDOUTPUT = False
     SAVEDATA = False
     LOADDATA = True
-    TRAIN = True
+    TRAIN = False
     TEST = False
-    SHOWATTEN = False
+    SHOWATTEN = True
     SHOWSHAP = False
-    SHOWPATH = True
+    SHOWPATH = False
 
-    target_case = "20240415145450"  # only used when ADDOUTPUT is False
+    target_case = "image-norm"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -223,7 +225,8 @@ if __name__ == "__main__":
                     plt.imshow(org_img[i])
                     for j in range(output_channel):
                         plt.subplot(bs, 1 + output_channel, i * (1 + output_channel) + j + 2)
-                        plt.imshow(attens[j][i])
+                        plt.imshow(org_img[i], zorder=1)
+                        plt.imshow(np.array(Image.fromarray(attens[j][i] * 255).resize(org_img[i].size)).astype(np.uint8), interpolation="bilinear", alpha=0.6, zorder=2)
                 plt.savefig(os.path.join(output_dir, "atten", f"{row}_{col}.png"))
                 plt.clf()
                 plt.close()

@@ -395,12 +395,14 @@ class AIRL:
         self.generator.to(self.device)
         return sv_reshaped
 
-    def show_attention_map(self, idxs):
+    def show_attention_map(self, idxs, show=True, save_file=None):
         len_imgs = 0
         fig = plt.figure(figsize=(5, 5 * len(idxs)))
+        attens = []
         for i in idxs:
             images = self.image_data.load_link_image(i)  # list(tensor(n, c, h, w))
             len_imgs = max(len_imgs, len(images))
+            attens_tmp = []
             for num_source, img in enumerate(images):
                 img = img.to(self.device)
                 compressed = self.encoder.compress(img, num_source=num_source)
@@ -414,8 +416,14 @@ class AIRL:
                 ax.imshow(img_show)
                 ax = fig.add_subplot(len(idxs), len_imgs * 2, (len_imgs * 2) * i + num_source + 1 + len_imgs)
                 ax.imshow(atten, interpolation='bilinear')
-        plt.show()
+                attens_tmp.append(atten)
+                if save_file is not None:
+                    plt.savefig(save_file.replace(".png", f"_{i}_{num_source}.png"))
+            attens.append(attens_tmp)
+        if show:
+            plt.show()
         print("show_attention_map end.")
+        return attens
 
     def show_encoder_shap(self, idxs, show=True, save_file=None):
         # img_tensor: tensor(bs2, c, h, width) or (c, h, width)

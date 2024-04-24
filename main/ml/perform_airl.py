@@ -71,10 +71,11 @@ if __name__ == "__main__":
     image_file = os.path.join(fig_dir, "train.png")
     output_dir = read_save["output_dir"]
 
-    ADDOUTPUT = False
-    TRAIN = False
+    ADDOUTPUT = True
+    TRAIN = True
     TEST = False
-    SHAP = True
+    SHAP = False
+    ATTEN = True
 
     target_case = "20240424054518"  # only used when ADDOUTPUT is False
 
@@ -150,13 +151,25 @@ if __name__ == "__main__":
                  hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, use_compressed_image=use_compressed_image, device=device)
 
     if TRAIN:
-        airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, ratio=ratio, max_train_num=1000, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
+        print("Training starts.")
+        airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, ratio=ratio, max_train_num=500, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
+        print("Training ends.")
     if TEST:
         airl.load()
+        print("Test starts.")
         airl.test(datasets_test)
         #airl.show_attention_map([0])
+        print("Test ends.")
     if SHAP:
         airl.load()
+        print("Showing SHAP starts.")
         #airl.get_shap(datasets_test, 0)
         link_idxs = [0]
         airl.show_encoder_shap(link_idxs, show=True, save_file=os.path.join(output_dir, f"shap.png"))
+    if ATTEN:
+        airl.load()
+        print("Showing attention map starts.")
+        link_idxs = [0]
+        airl.show_attention_map(link_idxs, show=True, save_file=os.path.join(output_dir, f"atten.png"))
+    
+    print("Program ends.")
