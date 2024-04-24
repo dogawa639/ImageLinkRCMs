@@ -71,12 +71,12 @@ if __name__ == "__main__":
     image_file = os.path.join(fig_dir, "train.png")
     output_dir = read_save["output_dir"]
 
-    ADDOUTPUT = True
-    TRAIN = True
+    ADDOUTPUT = False
+    TRAIN = False
     TEST = False
-    SHAP = False
+    SHAP = True
 
-    target_case = "20240415145450"  # only used when ADDOUTPUT is False
+    target_case = "20240424054518"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -150,11 +150,11 @@ if __name__ == "__main__":
                  hinge_loss=hinge_loss, hinge_thresh=hinge_thresh, use_compressed_image=use_compressed_image, device=device)
 
     if TRAIN:
-        airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, ratio=ratio, max_train_num=10, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
+        airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, ratio=ratio, max_train_num=1000, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
     if TEST:
         airl.load()
-        #airl.test(datasets_test)
-        airl.show_attention_map([0])
+        airl.test(datasets_test)
+        #airl.show_attention_map([0])
     if SHAP:
         airl.load()
         airl.get_shap(datasets_test, 0)

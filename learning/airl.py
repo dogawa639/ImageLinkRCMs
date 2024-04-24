@@ -244,7 +244,7 @@ class AIRL:
         log.close()
 
     def test(self, datasets):
-        dataset_kwargs = {"batch_size": 64, "shuffle": False}
+        dataset_kwargs = {"batch_size": 16, "shuffle": False}
         dataloaders_test = [DataLoader(dataset, **dataset_kwargs)for dataset in datasets]
 
         print("test start.")
@@ -307,12 +307,13 @@ class AIRL:
                                                                                   criteria_test[i]))
         print("test end.")
 
-    def get_shap(self, datasets, i, sample_num=50):
+    def get_shap(self, datasets, i, sample_num=10):
         if self.use_w:
             raise NotImplementedError("get_shap is not implemented when use_w is True.")
         # shap for generator
         dataset_kwargs = {"batch_size": 1, "shuffle": False}
         dataloaders_test = [DataLoader(dataset, **dataset_kwargs) for dataset in datasets]
+        self.eval()
 
         inputs = None
         for tmp_i, dataloader_test in enumerate(dataloaders_test):
