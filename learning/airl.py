@@ -489,10 +489,10 @@ class AIRL:
             mask = mask.view(-1, 1, logits.shape[-2], logits.shape[-1])
         logits = torch.where(mask > 0, logits, tensor(-9e15, dtype=torch.float32,
                                                       device=logits.device))
-        pi_g = self.get_pi_from_logits(logits)[:, i, :, :].view(logits.shape[0], -1)  # (bs, 9)
+        pi_g = self.get_pi_from_logits(logits)[:, i, :, :].view(*next_mask.shape)  # (bs, 9)
         ll = log((pi_g * next_mask.view(pi_g.shape)).sum(dim=-1)).sum()
 
-        pred_mask = (pi_g == pi_g.max(dim=1, keepdim=True)[0]).to(torch.float32)
+        pred_mask = (pi_g == pi_g.max(dim=-1, keepdim=True)[0]).to(torch.float32)
         mask = mask.view(*next_mask.shape)
         tp = (next_mask * pred_mask).sum()
         fp = (mask * (1-next_mask) * pred_mask).sum()
