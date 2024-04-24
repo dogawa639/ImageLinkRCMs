@@ -136,6 +136,7 @@ if __name__ == "__main__":
     else:
         mesh_traj_data = MeshTrajStatic(pp_path, mnw_data, pp_path_small)  # write down the trimmed data into the pp_path_small
     print(f"Split dataset into train & val ({train_ratio / 5}) and test ({(1 - train_ratio) / 5})")
+    print(f"Split dataset into train & val ({train_ratio / 5}) and test ({(1 - train_ratio) / 5})")
     mesh_traj_train, mesh_traj_test = mesh_traj_data.split_into((train_ratio / 5, (1 - train_ratio) / 5))
     dataset_train = MeshDatasetStatic(mesh_traj_train, 1)
     dataset_test = MeshDatasetStatic(mesh_traj_test, 1)
@@ -241,5 +242,6 @@ if __name__ == "__main__":
         airl.load()
         mesh_traj_onepath = MeshTrajStatic([os.path.join(data_dir, "pp_mesh/onepath/walk_9.csv")], mnw_data)
         dataset_onepath = MeshDatasetStatic(mesh_traj_onepath, 1)
+        airl.show_sample_path(dataset_onepath, 0, save_file=os.path.join(output_dir, "walk_9_onepath.png"))
         airl.show_sample_path(dataset_onepath, 0, save_file=os.path.join(output_dir, "walk_9_onepath.png"))
     print("Program ends.")
