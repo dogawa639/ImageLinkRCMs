@@ -71,13 +71,13 @@ if __name__ == "__main__":
     image_file = os.path.join(fig_dir, "train.png")
     output_dir = read_save["output_dir"]
 
-    ADDOUTPUT = True
-    TRAIN = True
+    ADDOUTPUT = False
+    TRAIN = False
     TEST = False
-    SHAP = False
-    ATTEN = True
+    SHAP = True
+    ATTEN = False
 
-    target_case = "20240424054518"  # only used when ADDOUTPUT is False
+    target_case = "image-norm-cnn-tokei"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -152,7 +152,7 @@ if __name__ == "__main__":
 
     if TRAIN:
         print("Training starts.")
-        airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, ratio=ratio, max_train_num=500, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
+        airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, ratio=ratio, max_train_num=200, d_epoch=d_epoch, lr_f0=lr_f0, lr_e=lr_e, image_file=image_file)
         print("Training ends.")
     if TEST:
         airl.load()
@@ -164,12 +164,12 @@ if __name__ == "__main__":
         airl.load()
         print("Showing SHAP starts.")
         #airl.get_shap(datasets_test, 0)
-        link_idxs = [0]
+        link_idxs = [1, 2, 3, 4, 5, 6, 7]
         airl.show_encoder_shap(link_idxs, show=True, save_file=os.path.join(output_dir, f"shap.png"))
     if ATTEN:
         airl.load()
         print("Showing attention map starts.")
-        link_idxs = [0]
+        link_idxs = [1,2,3]
         airl.show_attention_map(link_idxs, show=True, save_file=os.path.join(output_dir, f"atten.png"))
     
     print("Program ends.")

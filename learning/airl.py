@@ -307,6 +307,11 @@ class AIRL:
         for i in range(len(accuracy_test)):
             print("test accuracy {}: {:.4f}, ll0: {:.4f}, ll: {:.4f}, criteria: {:.4f}".format(i, accuracy_test[i], ll0_test[i], ll_test[i],
                                                                                   criteria_test[i]))
+        # save result
+        with open(os.path.join(self.model_dir, "test_result.txt"), "w") as f:
+            for i in range(len(accuracy_test)):
+                f.write("test accuracy {}: {:.4f}, ll0: {:.4f}, ll: {:.4f}, criteria: {:.4f}\n".format(i, accuracy_test[i], ll0_test[i], ll_test[i], criteria_test[i]))
+
         print("test end.")
 
     def get_shap(self, datasets, i, sample_num=10):
@@ -461,6 +466,36 @@ class AIRL:
                     plt.savefig(path)
                 else:
                     plt.show()
+        return shap_values
+    
+    def show_img_shap(self, img_tensor, show=True, save_file=None):
+        # img_tensor: tensor(bs2, c, h, width)
+        self.eval()
+        self.encoder.train()
+        fig = plt.figure(figsize=(5, 5))
+        img_tensor = img_tensor.to(self.device)
+
+        if self.explainer is None:
+            cnt = 0
+            backgrounds = []
+            while len(backgrounds) < 5 and cnt < 100:
+                tmp = self.image_data.load_link_image(cnt)
+                if tmp is not None:
+                    backgrounds.append(tmp[0])
+                cnt += 1
+            backgrounds = torch.cat(backgrounds, dim=0).to(self.device)
+            self.explainer = shap.DeepExplainer(_Encoder(self.encoder, 0), backgrounds)
+
+        shap_values = self.explainer.shap_values(img_tensor)  # [(bs, c, w, h)] or [(c, w, h)]
+        shap_values = [sv if len(sv.shape) == 4 else np.expand_dims(sv, 0) for sv in shap_values]  # [(bs, c, w, h)]
+        if show:
+            shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in shap_values]  # [(bs, w, h, c)]
+            img_numpy = np.swapaxes(np.swapaxes(img_tensor.clone().detach().cpu().numpy(), 1, -1), 1, 2)  # (n, w, h, c)
+            shap.image_plot(shap_numpy, (img_numpy * np.array([44.63, 45.54, 45.94]).reshape(1, 1, 1, -1) + np.array([110.96, 110.76, 102.67]).reshape(1, 1, 1, -1)).astype(np.uint8), show=False)
+            if save_file is not None:
+                plt.savefig(save_file)
+            else:
+                plt.show()
         return shap_values
 
     def loss(self, log_d_g, log_d_d, hinge_loss=False):
