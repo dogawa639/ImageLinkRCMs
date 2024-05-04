@@ -77,18 +77,19 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    IMAGE = False
-    USESMALL = True
-    ADDOUTPUT = False
-    SAVEDATA = False
+    IMAGE = True
+    USESMALL = False
+    ADDOUTPUT = True
+    SAVEDATA = False  # reconfigure if it's set True
     LOADDATA = True
-    TRAIN = False
-    TEST = False
-    SHOWATTEN = True
-    SHOWSHAP = False
+    TRAIN = True
+    TEST = True
+    SHOWATTEN = False
+    SHOWSHAP = True
     SHOWPATH = False
 
-    target_case = "image-norm"  # only used when ADDOUTPUT is False
+    target_case = "20240502013148"  # only used when ADDOUTPUT is False
+    mesh_image_dir = os.path.join(mesh_image_dir, str(mesh_dist))
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -112,10 +113,12 @@ if __name__ == "__main__":
 
     print("Create MeshNetwork object")
     print(f"bb_coords: {bb_coords}, w_dim: {w_dim}, h_dim: {h_dim}")
-    mnw_data = MeshNetwork(bb_coords, w_dim, h_dim, 5)  # prop_dim: prop from one_hot image
+    mnw_data = MeshNetwork(bb_coords, w_dim, h_dim, 3)  # prop_dim: prop from one_hot image
 
     # main process
     if IMAGE:
+        if not os.path.exists(mesh_image_dir):
+            os.makedirs(mesh_image_dir)
         # split image into mesh
         print("Split image into mesh")
         image_data = SatelliteImageData(image_data_path, resolution=0.5,
@@ -193,7 +196,7 @@ if __name__ == "__main__":
 
     if TRAIN:
         print("Pre training start")
-        airl.pretrain_models(CONFIG, 1, bs, lr_g, shuffle, train_ratio=train_ratio)
+        airl.pretrain_models(CONFIG, 0, bs, lr_g, shuffle, train_ratio=train_ratio)
         print("Training start")
         airl.train_models(CONFIG, epoch, bs, lr_g, lr_d, shuffle, train_ratio=train_ratio, d_epoch=d_epoch, image_file=image_file)
 
@@ -226,7 +229,7 @@ if __name__ == "__main__":
                     for j in range(output_channel):
                         plt.subplot(bs, 1 + output_channel, i * (1 + output_channel) + j + 2)
                         plt.imshow(org_img[i], zorder=1)
-                        plt.imshow(np.array(Image.fromarray(attens[j][i] * 255).resize(org_img[i].size)).astype(np.uint8), interpolation="bilinear", alpha=0.6, zorder=2)
+                        plt.imshow(np.array(Image.fromarray(attens[j][i] * 255).resize(org_img[i].size)).astype(np.uint8), interpolation="bilinear", alpha=0.8, zorder=2)
                 plt.savefig(os.path.join(output_dir, "atten", f"{row}_{col}.png"))
                 plt.clf()
                 plt.close()

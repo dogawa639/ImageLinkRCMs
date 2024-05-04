@@ -168,7 +168,7 @@ class MeshAIRLStatic:
                         del log_d_g, log_d_d, loss_d, loss_g
                 # update learning rate
                 if e > 0 and e % 10 == 0:
-                    gamma = 0.5
+                    gamma = 0.8
                     for param_group in optimizer_gs[channel].param_groups:
                         param_group['lr'] = param_group['lr'] * gamma
                     for param_group in optimizer_ds[channel].param_groups:
@@ -460,12 +460,12 @@ class MeshAIRLStatic:
             epoch_bs_count.append(bs_count)
 
         for i in range(self.output_channel):
-            print(f"channel {i}: accuracy: {epoch_accuracy[i]}, ll: {epoch_ll[i]} (Ave. {epoch_ll[i] / epoch_bs[i]}), ll0: {epoch_ll0[i]}, dist: {epoch_dist[i]}, criteria: {epoch_criteria[i]}, total_row: {epoch_bs[i]}, bs: {epoch_bs[i] / epoch_bs_count[i]}")
+            print(f"channel {i}: accuracy: {epoch_accuracy[i]}, ll: {epoch_ll[i]} (Ave. {epoch_ll[i] / epoch_bs[i]}), ll0: {epoch_ll0[i]}, ll_ratio: {1 - epoch_ll[i] / epoch_ll0[i]}, dist: {epoch_dist[i]}, criteria: {epoch_criteria[i]}, total_row: {epoch_bs[i]}, bs: {epoch_bs[i] / epoch_bs_count[i]}")
 
         # save result
         with open(os.path.join(self.model_dir, "test_result.txt"), "w") as f:
             for i in range(self.output_channel):
-                f.write(f"channel {i}: accuracy: {epoch_accuracy[i]}, ll: {epoch_ll[i]} (Ave. {epoch_ll[i] / epoch_bs[i]}), ll0: {epoch_ll0[i]}, dist: {epoch_dist[i]}, criteria: {epoch_criteria[i]}, total_row: {epoch_bs[i]}, bs: {epoch_bs[i] / epoch_bs_count[i]}\n")
+                f.write(f"channel {i}: accuracy: {epoch_accuracy[i]}, ll: {epoch_ll[i]} (Ave. {epoch_ll[i] / epoch_bs[i]}), ll0: {epoch_ll0[i]}, ll_ratio: {1 - epoch_ll[i] / epoch_ll0[i]}, dist: {epoch_dist[i]}, criteria: {epoch_criteria[i]}, total_row: {epoch_bs[i]}, bs: {epoch_bs[i] / epoch_bs_count[i]}\n")
 
         print("test end.")
 
@@ -658,17 +658,17 @@ class MeshAIRLStatic:
             self.explainers = [shap.DeepExplainer(_Encoder(self.encoders[channel]), backgrounds) for channel in range(self.output_channel)]
 
         shap_values = [self.explainers[channel].shap_values(img_tensor) for channel in range(self.output_channel)]
+        for channel in range(self.output_channel):
+            sv = shap_values[channel]
+            sv = [s if len(s.shape) == 4 else np.expand_dims(s, 0) for s in sv]  # [(bs, c, w, h)]
+            shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in sv]  # (bs, c, h, w)
+            img_numpy = np.swapaxes(np.swapaxes(img_tensor.clone().detach().cpu().numpy(), 1, -1), 1, 2)
+            shap.image_plot(shap_numpy, (img_numpy * np.array([44.63, 45.54, 45.94]).reshape(1, 1, 1, -1) + np.array([110.96, 110.76, 102.67]).reshape(1, 1, 1, -1)).astype(np.uint8), show=False)
+            if save_file is not None:
+                path = save_file.replace(".png", f"_channel{channel}.png")
+                plt.savefig(path)
         if show:
-            for channel in range(self.output_channel):
-                sv = shap_values[channel]
-                sv = [s if len(s.shape) == 4 else np.expand_dims(s, 0) for s in sv]  # [(bs, c, w, h)]
-                shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in sv]  # (bs, c, h, w)
-                img_numpy = np.swapaxes(np.swapaxes(img_tensor.clone().detach().cpu().numpy(), 1, -1), 1, 2)
-                shap.image_plot(shap_numpy, (img_numpy * np.array([44.63, 45.54, 45.94]).reshape(1, 1, 1, -1) + np.array([110.96, 110.76, 102.67]).reshape(1, 1, 1, -1)).astype(np.uint8), show=False)
-                if save_file is not None:
-                    path = save_file.replace(".png", f"_channel{channel}.png")
-                    plt.savefig(path)
-                plt.show()
+            plt.show()
         return shap_values
 
     def show_sample_path(self, dataset, channel, save_file=None):

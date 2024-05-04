@@ -97,7 +97,7 @@ class ViTEnc(nn.Module):
         self.output_atten = output_atten
 
         patch_dim = vit_patch_size[0] * vit_patch_size[1] * patch_size[0]
-        self.vit = nn.ModuleList([ViT(patch_size, vit_patch_size, mid_dim, patch_dim // 2, depth, heads, dropout, output_atten=True) for _ in range(num_source)])
+        self.vit = nn.ModuleList([ViT(patch_size, vit_patch_size, mid_dim, patch_dim // 2, depth, heads, dropout, output_atten=True, pool='mean') for _ in range(num_source)])
 
         self.lin = nn.ModuleList([FF(self.mid_dim, emb_dim, self.mid_dim*2, bias=True) for _ in range(num_source)])
         self.norm0 = nn.LayerNorm(patch_size)
