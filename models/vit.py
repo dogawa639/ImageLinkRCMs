@@ -66,7 +66,7 @@ class ViT(nn.Module):
         x, atten = self.transformer(x, None)  # x: (bs, 1+num_patches, dim), atten: [(bs, 1+num_patches, 1+num_patches)]
         atten_all = atten[0]  # (bs, 1+num_patches, 1+num_patches)
         for i in range(1, len(atten)):
-            atten_all = torch.matmul(atten[i], atten_all)
+            atten_all = torch.matmul(atten[i], atten_all) + atten_all
         if self.pool == "cls":
             x = x[:, 0]
             atten = atten_all[:, 0, 1:]

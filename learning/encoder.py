@@ -85,7 +85,7 @@ class CNNEnc(nn.Module):
 
 
 class ViTEnc(nn.Module):
-    def __init__(self, patch_size, vit_patch_size, emb_dim, mid_dim=1000, num_source=1, sln=True, w_dim=10, depth=6, heads=1, dropout=0.0, output_atten=False):
+    def __init__(self, patch_size, vit_patch_size, emb_dim, mid_dim=1000, num_source=1, sln=False, w_dim=10, depth=6, heads=1, dropout=0.0, output_atten=False):
         super().__init__()
         if type(patch_size) is int:
             patch_size = (3, patch_size, patch_size)
@@ -99,7 +99,7 @@ class ViTEnc(nn.Module):
         patch_dim = vit_patch_size[0] * vit_patch_size[1] * patch_size[0]
         self.vit = nn.ModuleList([ViT(patch_size, vit_patch_size, mid_dim, patch_dim // 2, depth, heads, dropout, output_atten=True, pool='mean') for _ in range(num_source)])
 
-        self.lin = nn.ModuleList([FF(self.mid_dim, emb_dim, self.mid_dim*2, bias=True) for _ in range(num_source)])
+        self.lin = nn.ModuleList([FF(self.mid_dim, emb_dim, self.mid_dim*2, bias=False) for _ in range(num_source)])
         self.norm0 = nn.LayerNorm(patch_size)
         if sln:
             self.norm1 = SLN(w_dim, self.mid_dim)

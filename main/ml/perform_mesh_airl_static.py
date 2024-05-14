@@ -77,16 +77,19 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    IMAGE = True
+    IMAGE = False
     USESMALL = False
     ADDOUTPUT = True
     SAVEDATA = False  # reconfigure if it's set True
     LOADDATA = True
     TRAIN = True
     TEST = True
-    SHOWATTEN = False
-    SHOWSHAP = True
+    SHOWATTEN = True
+    SHOWSHAP = False
     SHOWPATH = False
+    WRITELATENT = True
+    SHAREENCODER = False
+    SHAREAIRL = True
 
     target_case = "20240502013148"  # only used when ADDOUTPUT is False
     mesh_image_dir = os.path.join(mesh_image_dir, str(mesh_dist))
@@ -178,6 +181,10 @@ if __name__ == "__main__":
         discriminator, generator = get_models(model_names, **kwargs)
         generators.append(generator)
         discriminators.append(discriminator)
+    if SHAREAIRL:
+        for i in range(1, output_channel):
+            generators[i] = generators[0]
+            discriminators[i] = discriminators[0]
 
     encoders = None
     if use_encoder:
@@ -188,6 +195,10 @@ if __name__ == "__main__":
         encoders = []
         for _ in range(output_channel):
             encoders.append(get_models(model_names, **kwargs)[0])
+        if SHAREENCODER:
+            for i in range(1, output_channel):
+                encoders[i] = encoders[0]
+
 
     # create airl object and perform train and test
     print("Create MeshAIRLStatic object")
@@ -250,4 +261,25 @@ if __name__ == "__main__":
         dataset_onepath = MeshDatasetStatic(mesh_traj_onepath, 1)
         airl.show_sample_path(dataset_onepath, 0, save_file=os.path.join(output_dir, "walk_9_onepath.png"))
         airl.show_sample_path(dataset_onepath, 0, save_file=os.path.join(output_dir, "walk_9_onepath.png"))
+    if WRITELATENT:
+        airl.load()
+        airl.eval()
+        if not os.path.exists(os.path.join(output_dir, "latent")):
+            os.mkdir(os.path.join(output_dir, "latent"))
+        for row in range(h_dim):
+            for col in range(w_dim):
+                path = os.path.join(output_dir, "latent", f"{row}_{col}.txt")
+                image_tensor = image_data.load_mesh_image(row, col)[0].unsqueeze(0)  # tensor(1, c, h, w)
+                latent_feature = None
+                for i in range(output_channel):
+                    tmp_latent_feature = airl.encoders[i].compress(image_tensor.to(device))
+                    if type(tmp_latent_feature) is tuple:
+                        tmp_latent_feature = tmp_latent_feature[0]
+                    tmp_latent_feature = airl.encoders[i](tmp_latent_feature).clone().detach().cpu().numpy()  # (1, emb_dim)
+                    if latent_feature is None:
+                        latent_feature = tmp_latent_feature
+                    else:
+                        latent_feature = np.concatenate((latent_feature, tmp_latent_feature), axis=0)
+                write_2d_ndarray(path, latent_feature)
+                
     print("Program ends.")
