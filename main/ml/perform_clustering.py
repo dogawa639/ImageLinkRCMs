@@ -27,7 +27,7 @@ if __name__ == "__main__":
     fig_dir = read_save["figure_dir"]
     image_file = os.path.join(fig_dir, "train.png")
 
-    target_case = "20240514105617"
+    target_case = "20240514123322"
     output_dir = os.path.join(output_dir, target_case)
 
     latent_dir = os.path.join(output_dir, "latent")
@@ -59,7 +59,7 @@ if __name__ == "__main__":
     for i in range(output_channel):
         tmp_feature = features[labels == i]
         tmp_feature = StandardScaler().fit_transform(tmp_feature)
-        db = DBSCAN(eps=1.0, min_samples=10).fit(tmp_feature)
+        db = DBSCAN(eps=0.5, min_samples=10).fit(tmp_feature)
         pred_label = db.labels_
 
         dbs.append(db)
@@ -71,6 +71,11 @@ if __name__ == "__main__":
         print("Estimated number of clusters: %d" % n_clusters_)
         print("Estimated number of noise points: %d" % n_noise_)
         print("")
+
+        if i == 0:
+            x = PCA(1).fit_transform(tmp_feature)
+        elif i == 1:
+            y = PCA(1).fit_transform(tmp_feature)
 
     feature_cat = StandardScaler().fit_transform(feature_cat)
     feature_pca = PCA(2).fit_transform(feature_cat)
@@ -88,10 +93,11 @@ if __name__ == "__main__":
     df_label.to_csv(os.path.join(output_dir, "cluster.csv"), index=False)
 
     for idx, clu in idx2cluster.items():
-        #if "-1" in clu:
-        #    continue
+        if "-1" in clu:
+            continue
         tmp_idx = df_label["cluster"] == idx
         plt.scatter(feature_pca[tmp_idx, 0], feature_pca[tmp_idx, 1], label=str(clu))
+        #plt.scatter(x[tmp_idx], y[tmp_idx], label=str(clu))
     plt.legend()
     plt.xlabel("PCA 0")
     plt.ylabel("PCA 1")

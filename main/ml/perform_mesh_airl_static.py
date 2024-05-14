@@ -22,7 +22,7 @@ if __name__ == "__main__":
     from learning.mesh_airl_static import *
     from utility import *
 
-    CONFIG = "../../config/config_mesh_static.ini"
+    CONFIG = "../../config/config_mesh_static_noimage.ini"
     config = configparser.ConfigParser()
     config.read(CONFIG, encoding="utf-8")
     # general
@@ -84,14 +84,14 @@ if __name__ == "__main__":
     LOADDATA = True
     TRAIN = True
     TEST = True
-    SHOWATTEN = True
+    SHOWATTEN = False
     SHOWSHAP = False
     SHOWPATH = False
-    WRITELATENT = True
+    WRITELATENT = False
     SHAREENCODER = False
     SHAREAIRL = True
 
-    target_case = "20240502013148"  # only used when ADDOUTPUT is False
+    target_case = "20240514123322"  # only used when ADDOUTPUT is False
     mesh_image_dir = os.path.join(mesh_image_dir, str(mesh_dist))
 
     # add datetime to output_dir
