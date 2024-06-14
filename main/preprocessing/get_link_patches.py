@@ -27,10 +27,10 @@ if __name__ == "__main__":
     read_feature = config["FEATURE"]
     max_class_num = int(read_feature["max_class_num"])
 
-    SATELLITE = True
-    ONEHOT = True
-    LINKPROP = True
-    COMPRESS = False
+    SATELLITE = False
+    ONEHOT = False
+    LINKPROP = False
+    COMPRESS = True
     nw_data = NetworkCNN(node_path, link_path)
 
     if SATELLITE:
@@ -49,6 +49,6 @@ if __name__ == "__main__":
             image_data.write_link_prop(onehot_data_dir, link_prop_path)
 
     if COMPRESS:
-        encoder = resnet50(weights=ResNet50_Weights.DEFAULT)
+        encoder = resnet50(weights=ResNet50_Weights.DEFAULT, num_classes=2048)
         link_image_data = LinkImageData(os.path.join(image_data_dir, "satellite_image_processed.json"), nw_data)
         link_image_data.compress_images(encoder, device)

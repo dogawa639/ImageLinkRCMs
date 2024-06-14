@@ -780,6 +780,11 @@ class NetworkCNN(NetworkBase):
         action_edge = [[edge_down.id for edge_down in edge_tar.action_edges[i]] for i in range(9)]  # [[edge_id]]
 
         return context_mat, action_edge
+    
+    def get_action_edge(self, lid):
+        edge_tar = self.edges[lid]
+        action_edge = [[edge_down.id for edge_down in edge_tar.action_edges[i]] for i in range(9)]
+        return action_edge
 
     def get_all_feature_matrix(self, d_node_id, normalize=False):
         # all_features: [link_num, f+c]

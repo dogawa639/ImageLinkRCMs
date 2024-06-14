@@ -77,6 +77,8 @@ def get_models(model_names, nw_data=None, output_channel=None, config=None):
             models.append(GNNGen(nw_data, emb_dim_gen, output_channel, image_feature_num=emb_dim_enc, enc_dim=enc_dim_gen, in_emb_dim=in_emb_dim_gen, num_head=num_head_gen, dropout=dropout_gen, depth=depth_gen, pre_norm=False, sn=sn_gen, sln=sln, w_dim=w_dim))
         elif model_name == "CNNEnc":  # common for cnn and gnn link airl
             models.append(CNNEnc(patch_size_enc, emb_dim_enc, num_source=num_source_enc, sln=sln, w_dim=w_dim))
+        elif model_name == "CNNTransEnc":  # common for cnn and gnn link airl
+            models.append(CNNTransEnc(patch_size_enc, emb_dim_enc, num_source=num_source_enc, sln=sln, w_dim=w_dim))
         elif model_name == "ViTEnc":
             models.append(ViTEnc((3, patch_size_enc, patch_size_enc), (vit_patch_size_enc, vit_patch_size_enc), emb_dim_enc, mid_dim=mid_dim_enc, num_source=num_source_enc, sln=sln, w_dim=w_dim, depth=depth_enc, heads=num_head_enc, dropout=dropout_enc, output_atten=output_atten_enc))
         elif model_name == "CNNWEnc":

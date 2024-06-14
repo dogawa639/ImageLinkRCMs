@@ -71,13 +71,13 @@ if __name__ == "__main__":
     image_file = os.path.join(fig_dir, "train.png")
     output_dir = read_save["output_dir"]
 
-    ADDOUTPUT = False
-    TRAIN = False
-    TEST = False
+    ADDOUTPUT = True
+    TRAIN = True
+    TEST = True
     SHAP = True
     ATTEN = False
 
-    target_case = "image-norm-cnn-tokei"  # only used when ADDOUTPUT is False
+    target_case = "20240614100054"  # only used when ADDOUTPUT is False
 
     # add datetime to output_dir
     if ADDOUTPUT:
@@ -124,6 +124,8 @@ if __name__ == "__main__":
     if use_encoder:
         if model_type_enc == 'cnn':
             model_names += ["CNNEnc"]
+        elif model_type_enc == 'cnntrans':
+            model_names += ["CNNTransEnc"]
         elif model_type_enc == 'vit':
             model_names += ["ViTEnc"]
 
@@ -163,9 +165,14 @@ if __name__ == "__main__":
     if SHAP:
         airl.load()
         print("Showing SHAP starts.")
+        if not os.path.exists(os.path.join(output_dir, "shap")):
+            os.mkdir(os.path.join(output_dir, "shap"))
         #airl.get_shap(datasets_test, 0)
-        link_idxs = [1, 2, 3, 4, 5, 6, 7]
-        airl.show_encoder_shap(link_idxs, show=True, save_file=os.path.join(output_dir, f"shap.png"))
+        link_idxs = list(range(len(nw_data.lids)))
+        for i in range(2):
+            if not os.path.exists(os.path.join(output_dir, "shap", str(i))):
+                os.mkdir(os.path.join(output_dir, "shap", str(i)))
+            airl.show_encoder_shap(link_idxs, source=i, show=True, save_file=os.path.join(output_dir, "shap", str(i), f"shap.png"))
     if ATTEN:
         airl.load()
         print("Showing attention map starts.")

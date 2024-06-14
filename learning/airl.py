@@ -229,13 +229,18 @@ class AIRL:
                 print(f"save model. minimum criteria: {min_criteria}")
                 self.save()
 
-            if e == int(epochs * 3 / 4):
+            if e % int(epochs / 3) == 0:
                 optimizer_g = optim.Adam(self.generator.parameters(), lr=lr_g / 10)
                 optimizer_d = optim.Adam(self.discriminator.parameters(), lr=lr_d / 10)
                 if self.use_w:
                     optimizer_0 = optim.Adam(self.f0.parameters(), lr=lr_f0 / 10)
                 if train_encoder:
                     optimizer_e = optim.Adam(self.encoder.parameters(), lr=lr_e / 10)
+
+            if e % 5 == 0:
+                if not os.path.exists(os.path.join(self.model_dir, "joint_prob")):
+                    os.mkdir(os.path.join(self.model_dir, "joint_prob"))
+                self.get_joint_prob(os.path.join(self.model_dir, "joint_prob", f"joint_prob_{e}.csv"))
 
             t2 = time.perf_counter()
             print("epoch: {}, loss_g_val: {:.4f}, loss_d_val: {:.4f}, criteria: {:.4f}, time: {:.4f}".format(
@@ -313,6 +318,57 @@ class AIRL:
                 f.write("test accuracy {}: {:.4f}, ll0: {:.4f}, ll: {:.4f}, criteria: {:.4f}\n".format(i, accuracy_test[i], ll0_test[i], ll_test[i], criteria_test[i]))
 
         print("test end.")
+
+    def get_joint_prob(self, csv_path=None):
+        f = self.datasets[0].nw_data.feature_num
+        c = self.datasets[0].nw_data.context_feature_num
+        lid2idx = {lid: i for i, lid in enumerate(self.datasets[0].nw_data.lids)}
+        joint_pis = []
+        joint_pis_q = []
+        for tmp_link in self.datasets[0].nw_data.lids:
+            trip_input = np.zeros((1, f + c, 3, 3), dtype=np.float32)
+            trip_mask = np.zeros((1, 1, 9), dtype=np.float32)
+            trip_link_idxs = np.zeros((1, 9), dtype=np.int32)
+
+            feature_mat, _ = self.datasets[0].nw_data.get_feature_matrix(tmp_link, normalize=True)
+            action_edge = self.datasets[0].nw_data.get_action_edge(tmp_link)
+
+            trip_input[0, 0:f, :, :] = feature_mat
+            trip_mask[0, :] = [len(edges) > 0 and j != 4 for j, edges in enumerate(action_edge)]
+            trip_link_idxs[0, :] = [lid2idx[np.random.choice(edges)] if len(edges) > 0 else 0 for edges in action_edge]
+            trip_input = torch.tensor(trip_input, dtype=torch.float32, device=self.device)
+            trip_mask = torch.tensor(trip_mask, dtype=torch.bool, device=self.device)
+            trip_link_idxs = torch.tensor(trip_link_idxs, dtype=torch.int32, device=self.device)
+
+            trip_input, _, _, _ = self.cat_image_feature([trip_input, None, None, trip_link_idxs], w=None)
+
+            logits = self.generator(trip_input)  # (1, oc, *choice_space)
+            logits = torch.where(trip_mask.reshape(1, 1, *logits.shape[2:]) > 0, logits, tensor(-9e15, dtype=torch.float32,
+                                                                  device=logits.device))
+            pi = self.get_pi_from_logits(logits).clone().detach()
+            joint_pis.append(pi.cpu().numpy().squeeze(0).reshape(logits.shape[1], -1))  # (oc, len(choice_space))
+
+            # get choice prob based on Q function
+            _, util, ext, val = self.discriminator.get_vals(trip_input, pi)
+            logits_q = util + ext + 0.9 * val
+            logits_q = torch.where(trip_mask.reshape(1, 1, *logits_q.shape[2:]) > 0, logits_q, tensor(-9e15, dtype=torch.float32, device=logits_q.device))
+            pi_q = self.get_pi_from_logits(logits_q).clone().detach()
+            joint_pis_q.append(pi_q.cpu().numpy().squeeze(0).reshape(logits_q.shape[1], -1)) 
+
+        joint_pis = np.array(joint_pis)  # (link_num, oc, len(choice_space))
+        joint_pis_q = np.array(joint_pis_q)  # (link_num, oc, len(choice_space))
+        if csv_path is not None:
+            df = pd.DataFrame(joint_pis.reshape(joint_pis.shape[0], -1), columns=[f"pi_{i}(l{j}))" for i in range(joint_pis.shape[1]) for j in range(joint_pis.shape[2])])
+            df["lid"] = self.datasets[0].nw_data.lids
+            df.to_csv(csv_path, index=False)
+
+            df = pd.DataFrame(joint_pis_q.reshape(joint_pis_q.shape[0], -1), columns=[f"pi_{i}(l{j}))" for i in range(joint_pis_q.shape[1]) for j in range(joint_pis_q.shape[2])])
+            df["lid"] = self.datasets[0].nw_data.lids
+            df.to_csv(csv_path.replace(".csv", "_q.csv"), index=False)
+        
+        return joint_pis, joint_pis_q
+
+
 
     def get_shap(self, datasets, i, sample_num=10):
         if self.use_w:
@@ -430,10 +486,10 @@ class AIRL:
         print("show_attention_map end.")
         return attens
 
-    def show_encoder_shap(self, idxs, show=True, save_file=None):
+    def show_encoder_shap(self, idxs, source=0, show=True, save_file=None):
         # img_tensor: tensor(bs2, c, h, width) or (c, h, width)
         self.eval()
-        self.encoder.train()
+        self.encoder.train_all()
         fig = plt.figure(figsize=(5, 5 * len(idxs)))
         for i in idxs:
             images = self.image_data.load_link_image(i)  # [tensor(n, c, h, w)]
@@ -446,14 +502,13 @@ class AIRL:
             if self.explainer is None:
                 cnt = 0
                 backgrounds = []
-                while len(backgrounds) < 5 and cnt < 100:
-                    if cnt not in idxs:
-                        tmp = self.image_data.load_link_image(cnt)
-                        if tmp is not None:
-                            backgrounds.append(tmp[0])
+                while len(backgrounds) < 30 and cnt < 100:
+                    tmp = self.image_data.load_link_image(cnt)
+                    if tmp is not None:
+                        backgrounds.append(tmp[0])
                     cnt += 1
                 backgrounds = torch.cat(backgrounds, dim=0).to(self.device)
-                self.explainer = shap.DeepExplainer(_Encoder(self.encoder, 0), backgrounds)
+                self.explainer = shap.DeepExplainer(_Encoder(self.encoder, source), backgrounds)
 
             shap_values = self.explainer.shap_values(img_tensor)  # [(bs, c, w, h)] or [(c, w, h)]
             shap_values = [sv if len(sv.shape) == 4 else np.expand_dims(sv, 0) for sv in shap_values]  # [(bs, c, w, h)]
@@ -660,10 +715,14 @@ class AIRL:
     def save(self):
         self.generator.save(self.model_dir)
         self.discriminator.save(self.model_dir)
+        if self.use_encoder:
+            self.encoder.save(self.model_dir)
 
     def load(self):
         self.generator.load(self.model_dir)
         self.discriminator.load(self.model_dir)
+        if self.use_encoder:
+            self.encoder.load(self.model_dir)
 
     def _load_image_feature(self):
         # load compressed image feature and store in self.comp_feature
@@ -729,5 +788,13 @@ class _Encoder(nn.Module):
             compressed = compressed[0]
         #return self.model(compressed).sum(dim=-1).view(-1, 1)  # tensor((2d+1)^2, emb_dim)
         res = self.model(compressed)
-        res = res.sum(dim=-1).view(-1, 1)
+        res = res.sum(dim=-1, keepdim=True)
         return res  # tensor(bs, 1)
+    
+class _Encoder2(nn.Module):
+    def __init__(self, model, num_source=0):
+        super().__init__()
+        self.model = model
+        self.num_source = num_source
+    def forward(self, x):
+        return self.model.compress_forward(x, self.num_source)

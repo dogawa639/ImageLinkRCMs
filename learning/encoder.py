@@ -83,6 +83,119 @@ class CNNEnc(nn.Module):
         else:
             self.load_state_dict(torch.load(model_dir + f"/cnnenc_{i}.pth"))
 
+    def train_all(self):
+        self.train()
+
+class CNNTransEnc(nn.Module):
+    def __init__(self, patch_size, emb_dim, mid_dim=1000, num_source=1, sln=True, w_dim=10):
+        super().__init__()
+        if type(patch_size) is int:
+            patch_size = (3, patch_size, patch_size)
+        self.patch_size = patch_size  #(c, h, w)
+        self.emb_dim = emb_dim
+        self.sln = sln
+        self.w_dim = w_dim
+        self.mid_dim = mid_dim
+
+        self.resnet50 = resnet50(weights=ResNet50_Weights.DEFAULT, num_classes=2048)
+        self.resnet50.fc = nn.Identity()
+
+        self.lin = nn.ModuleList([FF(2048, emb_dim, 4096, bias=True) for _ in range(num_source)])
+        self.norm0 = nn.LayerNorm(patch_size)
+        if sln:
+            self.norm1 = SLN(w_dim, 2048)
+            self.norm2 = SLN(w_dim, emb_dim)  # layer norm at the last output
+        else:
+            self.norm1 = nn.LayerNorm(2048)
+            self.norm2 = nn.LayerNorm(emb_dim)
+
+    def forward(self, x, w=None, source_i=0):
+        # x: (bs2, mid_dim) or (mid_dim)
+        # w: (bs1, w_dim) or (w_dim)
+        # output: (bs1, bs2, emb_dim) or (bs2, emb_dim) or (emb_dim)
+
+        if self.sln and w is None:
+            raise Exception("w should be specified when sln is True")
+        use_bs = True
+        if x.dim() == 3:
+            use_bs = False
+            x = x.unsqueeze(0)
+
+        if w is not None and w.dim() == 2:
+            bs1 = w.shape[0]
+            x = x.expand(bs1, *x.shape)  # (bs1, bs2, 2024)
+
+        if self.sln:
+            self.norm1.set_w(w)
+            self.norm2.set_w(w)
+        x = self.norm1(x)
+        x = self.lin[source_i](x)
+        x = self.norm2(x)
+        if not use_bs:
+            x = x.squeeze(0)
+        return x
+
+    def compress(self, patch, num_source=0):
+        # satellite: (bs2, c, h, width) or (c, h, width)
+        if patch.dim() == 3:
+            patch = patch.unsqueeze(0)  # (1, c, h, w)
+        patch = self.norm0(patch)
+        x = self.resnet50(patch)   # (bs2, 1000)
+        return x
+    
+    def compress_forward(self, patch, num_source=0):
+        # for shap calculation
+        # satellite: (bs2, c, h, width) or (c, h, width)
+        if patch.dim() == 3:
+            patch = patch.unsqueeze(0)  # (1, c, h, w)
+        patch = self.norm0(patch)
+        x = self.resnet50(patch)   # (bs2, 1000)
+        use_bs = True
+        if x.dim() == 3:
+            use_bs = False
+            x = x.unsqueeze(0)
+        x = self.norm1(x)
+        x = self.lin[num_source](x)
+        x = self.norm2(x)
+        if not use_bs:
+            x = x.squeeze(0)
+        return x
+
+    def save(self, model_dir, i=None):
+        if i is None:
+            torch.save(self.state_dict(), model_dir + "/cnnenctrans.pth")
+        else:
+            torch.save(self.state_dict(), model_dir + f"/cnnenctrans_{i}.pth")
+
+    def load(self, model_dir, i=None):
+        if i is None:
+            self.load_state_dict(torch.load(model_dir + "/cnnenctrans.pth"))
+        else:
+            self.load_state_dict(torch.load(model_dir + f"/cnnenctrans_{i}.pth"))
+
+    def parameters(self):
+        return self.lin.parameters()
+
+    def train(self, mode=True):
+        #self.resnet50.eval()
+        self.resnet50.train(mode=mode)
+        self.lin.train(mode=mode)
+        self.norm0.train(mode=mode)
+        self.norm1.train(mode=mode)
+        self.norm2.train(mode=mode)
+
+    def eval(self):
+        self.resnet50.eval()
+        self.lin.eval()
+        self.norm0.eval()
+        self.norm1.eval()
+        self.norm2.eval()
+
+    def train_all(self):
+        self.train()
+        self.resnet50.train()
+
+
 
 class ViTEnc(nn.Module):
     def __init__(self, patch_size, vit_patch_size, emb_dim, mid_dim=1000, num_source=1, sln=False, w_dim=10, depth=6, heads=1, dropout=0.0, output_atten=False):
@@ -154,6 +267,9 @@ class ViTEnc(nn.Module):
             self.load_state_dict(torch.load(model_dir + "/vitenc.pth"))
         else:
             self.load_state_dict(torch.load(model_dir + f"/vitenc_{i}.pth"))
+
+    def train_all(self):
+        self.train()
 
 
 
