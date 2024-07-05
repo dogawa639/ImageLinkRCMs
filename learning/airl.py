@@ -229,7 +229,7 @@ class AIRL:
                 print(f"save model. minimum criteria: {min_criteria}")
                 self.save()
 
-            if e % int(epochs / 3) == 0:
+            if e % max(int(epochs / 3), 1) == 0:
                 optimizer_g = optim.Adam(self.generator.parameters(), lr=lr_g / 10)
                 optimizer_d = optim.Adam(self.discriminator.parameters(), lr=lr_d / 10)
                 if self.use_w:
@@ -243,8 +243,10 @@ class AIRL:
                 self.get_joint_prob(os.path.join(self.model_dir, "joint_prob", f"joint_prob_{e}.csv"))
 
             t2 = time.perf_counter()
-            print("epoch: {}, loss_g_val: {:.4f}, loss_d_val: {:.4f}, criteria: {:.4f}, time: {:.4f}".format(
-                e, epoch_loss_g_val[-1], epoch_loss_d_val[-1], criteria, t2 - t1))
+            print(f"epoch: {e}")
+            for i in range(len(epoch_loss_g)):
+                print("   mode: {}  loss_g_val: {:.4f}, loss_d_val: {:.4f}, criteria: {:.4f}, time: {:.4f}".format(
+                i, epoch_loss_g_val[i], epoch_loss_d_val[i], epoch_criteria[i], t2 - t1))
 
         if image_file is not None:
             log.save_fig(image_file)
@@ -256,12 +258,6 @@ class AIRL:
 
         print("test start.")
         self.eval()
-        ll0 = 0.0
-        ll = 0.0
-        tp = 0.0
-        fp = 0.0
-        tn = 0.0
-        fn = 0.0
         ll0_test = []
         accuracy_test = []
         ll_test = []
@@ -269,6 +265,12 @@ class AIRL:
         for i, dataloader_test in enumerate(dataloaders_test):
             mode_loss_g_test = []
             mode_loss_d_test = []
+            ll0 = 0.0
+            ll = 0.0
+            tp = 0.0
+            fp = 0.0
+            tn = 0.0
+            fn = 0.0
             for batch_real in dataloader_test:
                 batch_real = [tmp.to_dense().clone().detach().to(self.device) for tmp in batch_real]
                 w = None
@@ -302,7 +304,7 @@ class AIRL:
                 tn += tn_tmp.detach().cpu().item()
                 fn += fn_tmp.detach().cpu().item()
                 ll0 -= np.log(mask.clone().detach().cpu().numpy().reshape(mask.shape[0], -1).sum(1)).sum()
-            accuracy = (tp + fp) / (tp + fp + tn + fn)
+            accuracy = (tp) / (tp + fp)
             criteria = -ll
 
             ll0_test.append(ll0)
@@ -316,8 +318,16 @@ class AIRL:
         with open(os.path.join(self.model_dir, "test_result.txt"), "w") as f:
             for i in range(len(accuracy_test)):
                 f.write("test accuracy {}: {:.4f}, ll0: {:.4f}, ll: {:.4f}, criteria: {:.4f}\n".format(i, accuracy_test[i], ll0_test[i], ll_test[i], criteria_test[i]))
-
+        # create results_dict with suffix i
+        results_dict = dict()
+        for i in range(len(accuracy_test)):
+            results_dict[f"accuracy_{i}"] = accuracy_test[i]
+            results_dict[f"ll0_{i}"] = ll0_test[i]
+            results_dict[f"ll_{i}"] = ll_test[i]
+            results_dict[f"criteria_{i}"] = criteria_test[i]
+                        
         print("test end.")
+        return results_dict
 
     def get_joint_prob(self, csv_path=None):
         f = self.datasets[0].nw_data.feature_num
@@ -367,8 +377,6 @@ class AIRL:
             df.to_csv(csv_path.replace(".csv", "_q.csv"), index=False)
         
         return joint_pis, joint_pis_q
-
-
 
     def get_shap(self, datasets, i, sample_num=10):
         if self.use_w:
@@ -510,7 +518,7 @@ class AIRL:
                 backgrounds = torch.cat(backgrounds, dim=0).to(self.device)
                 self.explainer = shap.DeepExplainer(_Encoder(self.encoder, source), backgrounds)
 
-            shap_values = self.explainer.shap_values(img_tensor)  # [(bs, c, w, h)] or [(c, w, h)]
+            shap_values = self.explainer.shap_values(img_tensor).reshape(img_tensor.shape)  # [(bs, c, w, h)] or [(c, w, h)]
             shap_values = [sv if len(sv.shape) == 4 else np.expand_dims(sv, 0) for sv in shap_values]  # [(bs, c, w, h)]
             if show:
                 shap_numpy = [np.swapaxes(np.swapaxes(s, 1, -1), 1, 2) for s in shap_values]  # [(bs, w, h, c)]
